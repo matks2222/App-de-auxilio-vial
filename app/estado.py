@@ -224,7 +224,7 @@ class Estado:
 
         El producto sale del taller más cercano (dentro de radio_taller_km) que lo tenga disponible, con SU precio.
         Si ninguno lo tiene, se cotiza con el precio de referencia y se marca `referencia`.
-        total = producto + cargo de envío. El prototipo no cobra: el pago se acuerda con el repartidor."""
+        total = producto + cargo de envío. La app no cobra: el repartidor cobra el total que vio el cliente."""
         if tipo not in ("gasolina", "bateria_nueva", "aire_llantas", "paso_de_corriente"):
             return None
         with self.lock:

@@ -1,9 +1,9 @@
-"""Servidor del prototipo de auxilio vial con repartidores y talleres (FastAPI).
+"""Servidor de auxilio vial con repartidores y talleres (FastAPI).
 
 Ejecutar:  uvicorn app.main:app --reload
 Páginas:   /  /cliente  /repartidor  /taller  /qr  /negocio  /panel
 Sin ADMIN_PASSWORD la app está abierta (solo para uso local). Para publicarla en internet ver app/seguridad.py y el README.
-AVISO: prototipo académico sin pagos ni verificación de identidad.
+AVISO: sin pagos ni verificación de identidad de repartidores.
 """
 import asyncio
 import io
@@ -73,7 +73,7 @@ async def lifespan(app):
     tarea.cancel()
 
 
-app = FastAPI(title="Auxilio vial con repartidores (prototipo)", lifespan=lifespan)
+app = FastAPI(title="Auxilio vial con repartidores", lifespan=lifespan)
 class EstaticosSinCache(StaticFiles):
     """Sirve los archivos estáticos pidiendo al navegador que los revalide, para no ver copias viejas tras actualizar."""
     async def get_response(self, path, scope):
