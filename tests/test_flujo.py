@@ -757,7 +757,7 @@ def test_modo_publico_deja_abierto_lo_que_necesita_el_cliente(publico):
     cfg = c.get("/api/config").json()
     assert "url_publica" not in cfg["contacto"] and cfg["requiere_codigo"] is True
     h = c.get("/cliente").headers
-    assert h["x-content-type-options"] == "nosniff" and h["x-frame-options"] == "DENY" and h["referrer-policy"] == "same-origin"
+    assert h["x-content-type-options"] == "nosniff" and h["x-frame-options"] == "DENY" and h["referrer-policy"] == "strict-origin-when-cross-origin"
 
 
 def estado_lugar():
@@ -881,3 +881,42 @@ def test_render_yaml_tiene_lo_necesario():
                   "--proxy-headers", "$PORT", "pip install -r requirements.txt"]:
         assert pieza in y, pieza
     assert re.search(r"plan: starter", y) and "plan: free" not in y                                      # el gratuito borraría el disco
+
+
+def test_la_politica_de_referencia_permite_que_openstreetmap_vea_el_dominio(publico):
+    """Con same-origin los mapas daban 403 (osm.wiki/Blocked): el navegador debe mandar al menos el dominio a otros sitios."""
+    for ruta in ["/cliente", "/login", "/salud", "/static/comun.js"]:
+        assert publico.get(ruta).headers["referrer-policy"] == "strict-origin-when-cross-origin", ruta
+    from pathlib import Path
+    assert "referrerPolicy" in (Path(__file__).parent.parent / "app" / "static" / "comun.js").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("guardada", ["clave-larga-123", "  clave-larga-123  ", "clave-larga-123\n", '"clave-larga-123"', "'clave-larga-123'", ' "clave-larga-123" '])
+def test_la_contrasena_tolera_espacios_y_comillas_al_pegarla_en_el_hosting(monkeypatch, guardada):
+    from app import seguridad
+    monkeypatch.setenv("ADMIN_PASSWORD", guardada)
+    monkeypatch.setattr(seguridad, "limitador", seguridad.Limitador())
+    c = TestClient(app)
+    assert c.post("/api/login", json={"password": "clave-larga-123"}).status_code == 200
+    assert c.post("/api/login", json={"password": "  clave-larga-123 "}).status_code == 200            # y al escribirla con un espacio de más
+    assert c.post("/api/login", json={"password": "clave-larga-124"}).status_code == 401
+    assert c.post("/api/login", json={"password": ""}).status_code == 401
+
+
+def test_el_diagnostico_del_registro_no_revela_la_contrasena(monkeypatch):
+    from app import seguridad
+    monkeypatch.setenv("ADMIN_PASSWORD", ' "secreto-123" ')
+    d = seguridad.diagnostico("ADMIN_PASSWORD")
+    assert d == {"definida": True, "caracteres": 11, "espacios_extra": True, "comillas": True} and "secreto" not in str(d)
+    monkeypatch.delenv("ADMIN_PASSWORD")
+    assert seguridad.diagnostico("ADMIN_PASSWORD")["definida"] is False and not seguridad.modo_publico()
+    monkeypatch.setenv("ADMIN_PASSWORD", "   ")                                                       # solo espacios cuenta como no definida
+    assert not seguridad.modo_publico()
+
+
+def test_un_login_fallido_deja_un_registro_con_el_largo_pero_no_el_valor(publico, caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        publico.post("/api/login", json={"password": "mala-clave"})
+    msg = " ".join(r.getMessage() for r in caplog.records)
+    assert "10 caracteres" in msg and "15 caracteres" not in msg.split("tiene")[0] and "mala-clave" not in msg and "clave-larga-123" not in msg

@@ -58,6 +58,12 @@ async def bucle():
 @asynccontextmanager
 async def lifespan(app):
     log = logging.getLogger("uvicorn.error")
+    for nombre in ("ADMIN_PASSWORD", "CODIGO_COLABORADORES"):
+        d = seguridad.diagnostico(nombre)
+        if d["definida"]:       # solo el largo, nunca el valor: sirve para comparar con lo que escribes al iniciar sesión
+            log.info("%s configurada: %d caracteres%s%s", nombre, d["caracteres"],
+                     " (traía espacios al inicio o al final: se ignoran)" if d["espacios_extra"] else "",
+                     " (traía comillas: se ignoran)" if d["comillas"] else "")
     if not seguridad.modo_publico():
         log.warning("SIN CONTRASEÑA (ADMIN_PASSWORD no está definida): /panel, /qr y /negocio están abiertos. Úsalo solo en tu computadora.")
     elif not seguridad.codigo_colaboradores():
@@ -94,7 +100,9 @@ async def proteger(request: Request, call_next):
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")
-    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    # Con "same-origin" los mapas de OpenStreetMap respondían 403: exigen saber de qué sitio viene la petición (su política de uso de mapas).
+    # Esta política manda solo el dominio (nunca la ruta) a otros sitios y la ruta completa dentro del tuyo.
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return resp
 
 
@@ -606,6 +614,8 @@ def api_login(d: Login, request: Request):
         raise HTTPException(429, "Demasiados intentos. Espera unos minutos.")
     if not seguridad.password_ok(d.password):
         seguridad.limitador.anotar("login:" + ip)
+        logging.getLogger("uvicorn.error").warning("Inicio de sesión fallido: se escribieron %d caracteres (la contraseña configurada tiene %d)",
+                                                   len(d.password.strip()), seguridad.diagnostico("ADMIN_PASSWORD")["caracteres"])
         raise HTTPException(401, "Contraseña incorrecta")
     resp = JSONResponse({"ok": True})
     https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"

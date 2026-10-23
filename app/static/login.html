@@ -8,6 +8,7 @@
   <div class="sub">Esta sección es solo para el administrador.</div>
   <label for="password">Contraseña</label>
   <input id="password" type="password" autocomplete="current-password" maxlength="200" autofocus>
+  <label style="display:flex;gap:8px;align-items:center;margin-top:8px;color:#222"><input type="checkbox" id="ver" style="width:auto"> Mostrar contraseña</label>
   <div id="error" class="alerta" style="display:none"></div>
   <button id="entrar" class="btn-grande" style="margin-top:12px">Entrar</button>
 </div>
@@ -27,6 +28,7 @@ async function entrar() {
     location.href = destino();
   } catch (e) { $("error").textContent = e.message; $("error").style.display = "block"; $("entrar").disabled = false; $("password").select(); }
 }
+$("ver").onchange = () => { $("password").type = $("ver").checked ? "text" : "password"; };
 $("entrar").onclick = entrar;
 $("password").onkeydown = (e) => { if (e.key === "Enter") entrar(); };
 </script></body></html>

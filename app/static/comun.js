@@ -27,7 +27,7 @@ function suscribir(rol, id, alMensaje) {
 
 function crearMapa(div, centro = CENTRO, zoom = 14) {
   const m = L.map(div).setView(centro, zoom);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© Colaboradores de OpenStreetMap" }).addTo(m);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© Colaboradores de OpenStreetMap", referrerPolicy: "strict-origin-when-cross-origin" }).addTo(m);
   return m;
 }
 

@@ -16,12 +16,27 @@ COOKIE = "admin_sesion"
 DURACION_SESION_S = 14 * 24 * 3600
 
 
+def _limpio(valor):
+    """Quita espacios o saltos de línea de más y comillas que alguien pudo escribir al pegar el valor en el panel del hosting."""
+    v = (valor or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return v
+
+
 def admin_password():
-    return os.environ.get("ADMIN_PASSWORD", "")
+    return _limpio(os.environ.get("ADMIN_PASSWORD", ""))
 
 
 def codigo_colaboradores():
-    return os.environ.get("CODIGO_COLABORADORES", "")
+    return _limpio(os.environ.get("CODIGO_COLABORADORES", ""))
+
+
+def diagnostico(nombre):
+    """Datos para el registro del servidor (nunca el valor): cuántos caracteres tiene la variable y si traía espacios o comillas."""
+    crudo = os.environ.get(nombre, "")
+    return dict(definida=bool(crudo.strip()), caracteres=len(_limpio(crudo)), espacios_extra=crudo != crudo.strip(),
+                comillas=len(crudo.strip()) >= 2 and crudo.strip()[0] == crudo.strip()[-1] and crudo.strip()[0] in "\"'")
 
 
 def modo_publico():
@@ -48,12 +63,12 @@ def es_admin(cookies):
 
 
 def password_ok(intento):
-    return hmac.compare_digest(intento.encode(), admin_password().encode())
+    return hmac.compare_digest(_limpio(intento).encode(), admin_password().encode())
 
 
 def codigo_ok(intento):
     esperado = codigo_colaboradores()
-    return True if not esperado else hmac.compare_digest((intento or "").encode(), esperado.encode())
+    return True if not esperado else hmac.compare_digest(_limpio(intento).encode(), esperado.encode())
 
 
 def ip_cliente(request):

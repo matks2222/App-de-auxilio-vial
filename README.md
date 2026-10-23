@@ -152,6 +152,13 @@ Si Render se queja de la versión de Python, cambia `PYTHON_VERSION` en `render.
 el código (10 intentos por 10 minutos); el inicio de sesión se bloquea tras 5 intentos fallidos; cada conexión tiene un máximo de pedidos por hora; los enlaces de pedidos, repartidores y talleres son largos para que
 no se puedan adivinar; y se envían cabeceras de seguridad básicas. La cookie de sesión va marcada `Secure` detrás de https.
 
+**Si no te deja entrar con tu contraseña.** La app ignora espacios o comillas de más en `ADMIN_PASSWORD` y `CODIGO_COLABORADORES`, y al arrancar escribe en el registro del servidor (en Render, pestaña *Logs*)
+cuántos caracteres tiene cada una, nunca su valor. Compara ese número con lo que escribes: si no coincide, el servicio sigue usando un valor viejo y falta reiniciarlo. Al cambiar la variable en Render, elige la opción que **guarda y vuelve a desplegar**: con «solo guardar» el valor nuevo no se aplica
+hasta el siguiente despliegue. Cada intento fallido también deja un renglón con el largo de lo que se escribió. En el inicio de sesión puedes marcar «Mostrar contraseña» para ver lo que tecleas.
+
+**Mapas en blanco o con «403 Access blocked».** OpenStreetMap exige que el navegador le diga de qué sitio viene la petición. La app manda la cabecera `Referrer-Policy: strict-origin-when-cross-origin` y los mapas la repiten; si la cambias
+a `same-origin` o `no-referrer`, los mapas dejan de cargar. Los mapas públicos de OpenStreetMap son para uso ligero: si el servicio crece, usa un proveedor de mapas con llave.
+
 **Lo que sigue pendiente:** no hay pagos ni verificación de identidad de repartidores; el código de colaboradores es uno solo para todos (si se filtra, cámbialo en Render); los pedidos, repartidores y talleres siguen
 viviendo en memoria, así que **cada vez que Render reinicia o despliega el servicio** los repartidores tienen que registrarse otra vez (los QR, precios y tiempos reales sí se conservan en el disco); y detrás de un teléfono
 con IP compartida, el límite de pedidos por conexión podría afectar a varios clientes a la vez.
@@ -170,7 +177,7 @@ prototipo a internet y, como no tiene autenticación, úsalo solo un rato y con 
 - `render.yaml`: configuración para publicar en Render.
 - `app/main.py`: servidor FastAPI, WebSocket, enlaces cortos `/q/código`, imágenes QR y rutas de las páginas.
 - `app/static/`: páginas del cliente, el repartidor, el taller, los QR (`qr.html`), el letrero imprimible (`letrero.html`), las cuentas (`negocio.html`) y el panel (Leaflet con OpenStreetMap).
-- `tests/`: 65 pruebas automáticas (`python -m pytest tests -q`).
+- `tests/`: 74 pruebas automáticas (`python -m pytest tests -q`).
 
 Los eventos de la tabla `eventos` (en `despacho.db`) sirven para calibrar después el simulador con datos reales.
 
