@@ -1,0 +1,211 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedir ayuda</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="/static/estilo.css?v=8"></head><body>
+<script>if (/[?&](lugar|lat|lon)=/.test(location.search)) document.body.setAttribute("data-sin-menu", "");   // quien llega desde un QR no ve enlaces de administración</script>
+<header><h1>Pedir ayuda</h1><a href="/">Inicio</a></header>
+
+<div id="formulario" class="tarjeta">
+  <h2>¿Qué necesitas?</h2>
+  <div id="opciones" class="opciones"></div>
+
+  <div id="gasolina" style="display:none">
+    <div class="chips" id="chipsLitros"></div>
+    <div id="otraCantidad" style="display:none;margin-top:8px"><div class="chips"><input id="litros" type="number" inputmode="numeric" step="1" aria-label="Litros"><span style="align-self:center">litros</span></div></div>
+    <div class="chips" id="chipsCombustible"></div>
+  </div>
+
+  <div id="resumen" class="resumen" style="display:none"></div>
+  <div id="error" class="alerta" style="display:none"></div>
+  <button id="btnGPS" class="sec" style="width:100%;margin-top:12px">📍 Usar mi ubicación</button>
+  <button id="btnPedir" class="btn-grande" style="margin-top:10px" disabled>Elige una opción</button>
+</div>
+
+<div id="seguimiento" class="tarjeta" style="display:none">
+  <div id="estadoTexto" class="estado"></div>
+  <div id="detalle" class="sub"></div>
+  <div id="acciones" style="margin-top:10px"></div>
+</div>
+
+<div id="mapa" class="mini-mapa"></div>
+<div id="contacto" class="tarjeta" style="display:none"></div>
+<div class="pie">Prototipo académico. En una emergencia con riesgo para la vida, llama al 911.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="/static/comun.js?v=8"></script>
+<script>
+const mapa = crearMapa("mapa", CENTRO, 15);
+const $ = (id) => document.getElementById(id);
+let config = null, pos = null, marcaYo = null, marcaRep = null, sid = localStorage.getItem("sid"), cancelarSub = null, tCot = null;
+let servicio = null, litros = 5, combustible = "magna", otra = false, cotizacion = null;
+
+// ---- Llegada desde un QR (/cliente?lugar=...&lat=...&lon=...): la ubicación del letrero se toma en silencio
+const params = new URLSearchParams(location.search);
+const lugarQR = (params.get("lugar") || "").trim().slice(0, 60);
+
+const ICONOS = { gasolina: "⛽", aire_llantas: "🌬️", paso_de_corriente: "⚡" };
+const TITULOS = { gasolina: "Gasolina", aire_llantas: "Aire a las llantas", paso_de_corriente: "Paso de corriente" };
+const NOTAS = { aire_llantas: "Llevamos bomba", paso_de_corriente: "Llevamos cables" };
+
+// ---------------------------------------------------------------- precios
+function precioLocal() {                       // estimación con los precios de referencia, mientras no hay ubicación
+  const pr = config.precios, sv = pr.servicios[servicio];
+  return servicio === "gasolina" ? { subtotal: litros * pr.combustibles[combustible].litro, servicio: sv, total: litros * pr.combustibles[combustible].litro + sv } : { subtotal: 0, servicio: sv, total: sv };
+}
+function desde(tipo) {                         // precio que se muestra en cada opción
+  const pr = config.precios;
+  return tipo === "gasolina" ? 5 * pr.combustibles.magna.litro + pr.servicios.gasolina : pr.servicios[tipo];
+}
+function pintarOpciones() {
+  $("opciones").innerHTML = config.servicios_activos.filter((t) => TITULOS[t]).map((t) => `<button class="opcion ${servicio === t ? "elegida" : ""}" data-t="${t}">
+      <span class="ico">${ICONOS[t]}</span><span><span class="tit">${TITULOS[t]}</span><span class="pre">${t === "gasolina" ? "5 L, 10 L o la cantidad que quieras" : NOTAS[t]}</span></span>
+      <span class="monto">${t === "gasolina" ? "desde " : ""}${fmtMXN(desde(t))}</span></button>`).join("");
+  document.querySelectorAll(".opcion").forEach((b) => b.onclick = () => elegir(b.dataset.t));
+}
+function pintarGasolina() {
+  $("gasolina").style.display = servicio === "gasolina" ? "block" : "none";
+  if (servicio !== "gasolina") return;
+  const cant = [[5, "5 L"], [10, "10 L"]];
+  $("chipsLitros").innerHTML = cant.map(([n, t]) => `<button data-l="${n}" class="${!otra && litros === n ? "elegida" : ""}">${t}</button>`).join("") +
+    `<button data-l="otra" class="${otra ? "elegida" : ""}">Otra cantidad</button>`;
+  $("otraCantidad").style.display = otra ? "block" : "none";
+  $("chipsCombustible").innerHTML = Object.entries(config.precios.combustibles).map(([k, v]) =>
+    `<button data-c="${k}" class="${combustible === k ? "elegida" : ""}">${esc(v.nombre.replace(/ \(.*\)/, ""))} ${fmtMXN(v.litro)}/L</button>`).join("");
+  document.querySelectorAll("#chipsLitros button").forEach((b) => b.onclick = () => {
+    if (b.dataset.l === "otra") { otra = true; $("litros").value = litros; $("litros").focus(); } else { otra = false; litros = +b.dataset.l; }
+    cambio();
+  });
+  document.querySelectorAll("#chipsCombustible button").forEach((b) => b.onclick = () => { combustible = b.dataset.c; cambio(); });
+}
+$("litros").oninput = () => { const n = parseInt($("litros").value, 10); if (Number.isFinite(n)) litros = n; cambio(false); };
+
+function elegir(t) { servicio = t; cambio(); }
+function cambio(repintar = true) {
+  if (repintar) { pintarOpciones(); pintarGasolina(); }
+  $("error").style.display = "none";
+  cotizacion = null; actualizarResumen();
+  clearTimeout(tCot);
+  if (!servicio || !pos) return;
+  tCot = setTimeout(async () => {
+    const q = new URLSearchParams({ lat: pos.lat, lon: pos.lon, tipo: servicio });
+    if (servicio === "gasolina") { q.set("opcion", combustible); q.set("cantidad", litros); }
+    try { cotizacion = await api(`/api/cotizar?${q}`); actualizarResumen(); } catch (e) { mostrarError(e.message); }
+  }, 250);
+}
+function actualizarResumen() {
+  const r = $("resumen"), b = $("btnPedir");
+  if (!servicio) { r.style.display = "none"; b.disabled = true; b.textContent = "Elige una opción"; return; }
+  const valido = servicio !== "gasolina" || (Number.isInteger(litros) && litros >= config.litros.min && litros <= config.litros.max);
+  if (!valido) { r.style.display = "none"; b.disabled = true; b.textContent = `Escribe de ${config.litros.min} a ${config.litros.max} litros`; return; }
+  const c = cotizacion || precioLocal();
+  const linea = servicio === "gasolina"
+    ? `${litros} L de ${esc(config.precios.combustibles[combustible].nombre.replace(/ \(.*\)/, ""))}: <b>${fmtMXN(c.subtotal)}</b> + servicio a domicilio <b>${fmtMXN(c.servicio)}</b>`
+    : `Servicio a domicilio (${NOTAS[servicio].toLowerCase()}): <b>${fmtMXN(c.servicio)}</b>`;
+  r.innerHTML = `${linea}<br><span class="sub">Precio final, sin cargos extra. Se paga al repartidor.</span>`;
+  r.style.display = "block";
+  b.disabled = false; b.textContent = `Pedir ahora · ${fmtMXN(c.total)}`;
+}
+
+// ---------------------------------------------------------------- ubicación
+function fijarPos(lat, lon, centrar = true) {
+  pos = { lat, lon };
+  if (marcaYo) marcaYo.setLatLng([lat, lon]); else marcaYo = L.marker([lat, lon], { icon: pin("🚗", "#d9534f") }).addTo(mapa);
+  if (centrar) mapa.setView([lat, lon], 16);
+  $("btnGPS").textContent = "✓ Ubicación lista"; $("btnGPS").className = "ok";
+  $("btnGPS").style.display = "block";
+  cambio(false);
+}
+function pedirGPS() {
+  return new Promise((ok, mal) => {
+    if (!navigator.geolocation) return mal(new Error("sin geolocalización"));
+    navigator.geolocation.getCurrentPosition((p) => { fijarPos(p.coords.latitude, p.coords.longitude); ok(); }, mal, { enableHighAccuracy: true, timeout: 15000 });
+  });
+}
+mapa.on("click", (e) => { if (!sid) fijarPos(e.latlng.lat, e.latlng.lng, false); });
+$("btnGPS").onclick = () => pedirGPS().catch(() => mostrarError("No pudimos ubicarte. Activa la ubicación del celular o toca el mapa donde estás."));
+function mostrarError(t) { $("error").textContent = t; $("error").style.display = "block"; }
+
+// ---------------------------------------------------------------- pedir
+$("btnPedir").onclick = async () => {
+  $("error").style.display = "none";
+  if (!pos) { try { await pedirGPS(); } catch (e) { return mostrarError("Necesitamos tu ubicación: actívala en el celular o toca el mapa donde estás."); } }
+  $("btnPedir").disabled = true;
+  try {
+    const cuerpo = { lat: pos.lat, lon: pos.lon, tipo: servicio, lugar: lugarQR };
+    if (servicio === "gasolina") { cuerpo.opcion = combustible; cuerpo.cantidad = litros; }
+    const r = await api("/api/solicitudes", "POST", cuerpo);
+    sid = r.id; localStorage.setItem("sid", sid); iniciar();
+  } catch (e) { mostrarError(e.message); $("btnPedir").disabled = false; }
+};
+
+// ---------------------------------------------------------------- seguimiento
+function iniciar() {
+  $("formulario").style.display = "none"; $("seguimiento").style.display = "block";
+  if (cancelarSub) cancelarSub();
+  cancelarSub = suscribir("cliente", sid, pintar);
+}
+function pintar(snap) {
+  const s = snap.solicitud;
+  if (!s) { localStorage.removeItem("sid"); sid = null; location.reload(); return; }
+  if (s.hija_id) { sid = s.hija_id; localStorage.setItem("sid", sid); iniciar(); return; }
+  if (!marcaYo) marcaYo = L.marker([s.lat, s.lon], { icon: pin("🚗", "#d9534f") }).addTo(mapa);
+  const m = snap.repartidor;
+  if (m && m.lat != null) {
+    const ico = pin("🛵", "#2f6fdb");
+    if (marcaRep) { marcaRep.setLatLng([m.lat, m.lon]); } else marcaRep = L.marker([m.lat, m.lon], { icon: ico }).addTo(mapa);
+    mapa.fitBounds([[s.lat, s.lon], [m.lat, m.lon]], { padding: [30, 30], maxZoom: 16 });
+  } else {
+    if (marcaRep) { mapa.removeLayer(marcaRep); marcaRep = null; }
+    if (!marcaYo._puesto) { mapa.setView([s.lat, s.lon], 16); marcaYo._puesto = true; }
+  }
+  const sinCobertura = s.estado === "cancelada" && s.resultado === "sin_cobertura";
+  const textos = {                              // mensajes cortos; nunca se habla de "buscar" repartidor
+    pendiente: ["Recibimos tu pedido", "Te avisamos aquí en cuanto alguien salga hacia ti."],
+    ofertada: ["Recibimos tu pedido", "Te avisamos aquí en cuanto alguien salga hacia ti."],
+    aceptada: [m ? `${esc(m.nombre)} va en camino` : "Ya va en camino", `Llega en ${fmtEta(s.eta_s)}`],
+    en_sitio: ["Ya llegó", "Está atendiendo tu pedido."],
+    terminada: ["Listo ✓", ""],
+    cancelada: sinCobertura ? ["Ahora no pudimos enviar a nadie", "Lo sentimos. Llámanos o escríbenos y te ayudamos."] : ["Pedido cancelado", ""],
+  };
+  const [t, d] = textos[s.estado] || [s.estado, ""];
+  $("estadoTexto").textContent = t;
+  const c = s.cotizacion;
+  const resumen = c ? `<div style="margin-top:8px">🧾 ${esc(c.concepto)} · <b>${fmtMXN(c.total)}</b><br><span class="sub">Se paga al repartidor.</span></div>` : "";
+  $("detalle").innerHTML = `${d}${s.estado === "cancelada" && !sinCobertura ? "" : resumen}`;
+  const a = $("acciones");
+  if (["pendiente", "ofertada", "aceptada", "en_sitio"].includes(s.estado)) {
+    a.innerHTML = `<button class="mal" id="btnCancelar">Cancelar pedido</button>`;
+    $("btnCancelar").onclick = async () => { if (confirm("¿Cancelar el pedido?")) { try { await api(`/api/solicitudes/${sid}/cancelar`, "POST"); } catch (e) { alert(e.message); } } };
+  } else if (s.estado === "terminada" && !s.calificacion) {
+    a.innerHTML = `<div class="sub">¿Cómo te fue?</div><div class="estrellas">${[1, 2, 3, 4, 5].map((n) => `<button data-n="${n}">☆</button>`).join("")}</div>`;
+    a.querySelectorAll("button").forEach((b) => b.onclick = async () => { await api(`/api/solicitudes/${sid}/calificar`, "POST", { estrellas: +b.dataset.n }); });
+  } else {
+    a.innerHTML = (s.calificacion ? `<div class="sub">Gracias por calificar: ${"⭐".repeat(s.calificacion)}</div>` : "") +
+      `<button id="btnNueva" style="margin-top:8px">${sinCobertura ? "Intentar de nuevo" : "Pedir otra ayuda"}</button>`;
+    $("btnNueva").onclick = () => { localStorage.removeItem("sid"); location.reload(); };
+  }
+}
+
+// ---------------------------------------------------------------- contacto: para quien prefiere hablar con una persona
+function mostrarContacto(c) {
+  if (!c || (!c.whatsapp && !c.telefono)) return;
+  const wa = c.whatsapp ? `<a href="https://wa.me/${encodeURIComponent(c.whatsapp)}?text=${encodeURIComponent("Necesito ayuda vial" + (lugarQR ? " en " + lugarQR : ""))}" target="_blank" rel="noopener">💬 Escribir por WhatsApp</a>` : "";
+  const tel = c.telefono ? `<a href="tel:${encodeURIComponent(c.telefono.replace(/[^0-9+]/g, ""))}">📞 Llamar: ${esc(c.telefono)}</a>` : "";
+  $("contacto").innerHTML = `<div class="sub">¿Prefieres hablar con una persona?</div><div style="margin-top:6px;line-height:2.2;font-size:16px">${[wa, tel].filter(Boolean).join("<br>")}</div>`;
+  $("contacto").style.display = "block";
+}
+
+// ---------------------------------------------------------------- arranque
+api("/api/config").then((c) => {
+  config = c; mostrarContacto(c.contacto);
+  $("litros").min = c.litros.min; $("litros").max = c.litros.max;
+  pintarOpciones(); actualizarResumen();
+}).catch(() => mostrarError("No pudimos cargar la página. Revisa tu conexión e inténtalo de nuevo."));
+
+if (sid) iniciar();
+else {
+  const lat = parseFloat(params.get("lat")), lon = parseFloat(params.get("lon"));
+  if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) fijarPos(lat, lon);   // desde un QR con ubicación
+  else pedirGPS().catch(() => {});                                                                                     // sin clic: se pide al abrir
+}
+</script></body></html>

@@ -1,0 +1,139 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Códigos QR y letreros</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="/static/estilo.css?v=8">
+<style>
+  .centrado { max-width:760px; margin:0 auto; }
+  .lugar { display:grid; grid-template-columns: 120px 1fr; gap:12px; padding:12px 0; border-bottom:1px solid #eee; }
+  .lugar img { width:120px; height:120px; border:1px solid #ddd; border-radius:8px; background:#fff; }
+  .lugar .botones { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .lugar .botones a, .lugar .botones button { font-size:13px; padding:7px 10px; border-radius:8px; text-decoration:none; }
+  .lugar .botones a { background:#e9e1e4; color:#7B1E3A; }
+  .enlace { font-size:12px; word-break:break-all; color:var(--gris); }
+  #mapa { height:34vh; }
+</style></head><body>
+<header><h1>Códigos QR y letreros</h1></header>
+<div class="centrado">
+
+<div class="tarjeta">
+  <h2>1. Dirección y contacto</h2>
+  <div id="estadoUrl"></div>
+  <label>Dirección pública de la app (la que abren los QR)</label>
+  <input id="url" inputmode="url" maxlength="200" placeholder="https://tudominio.com">
+  <div class="sub" style="margin-top:4px">Debe ser una dirección de internet con https. <b>Si la cambias, los QR ya impresos con la anterior dejan de servir</b>: configúrala antes de imprimir.</div>
+  <div class="fila">
+    <div><label>WhatsApp</label><input id="whatsapp" inputmode="tel" maxlength="30" placeholder="55 1234 5678"></div>
+    <div><label>Teléfono</label><input id="telefono" inputmode="tel" maxlength="30" placeholder="55 1234 5678"></div>
+  </div>
+  <div class="sub" style="margin-top:4px">Salen en los letreros y en la pantalla de pedir ayuda, para quien no pueda usar la app.</div>
+  <div id="errorAj" class="alerta" style="display:none"></div>
+  <div id="okAj" class="aviso" style="display:none">Guardado.</div>
+  <button id="btnAjustes" style="width:100%;margin-top:10px">Guardar</button>
+</div>
+
+<div class="tarjeta">
+  <h2>2. Crea el QR de un lugar</h2>
+  <div class="sub">Pon un QR distinto en cada punto (gasolinera, estacionamiento, esquina). Marca en el mapa dónde queda el letrero:
+    quien lo escanee llegará con esa ubicación ya puesta. Para tarjetas o imanes que se llevan en el coche, deja el lugar sin ubicación.</div>
+</div>
+<div id="mapa"></div>
+<div class="tarjeta" style="margin-top:0">
+  <div class="fila" style="margin:8px 0"><button id="btnGPS" class="sec">📍 Usar mi ubicación</button><button id="btnLimpiar" class="sec">Sin ubicación (QR general)</button></div>
+  <div id="posTexto" class="sub">Ubicación: sin marcar (tócala en el mapa)</div>
+  <label>Nombre del lugar (aparece en el letrero y en las estadísticas)</label>
+  <input id="nombre" maxlength="60" placeholder="Ej. Gasolinera Centro, bomba 3">
+  <div id="errorLugar" class="alerta" style="display:none"></div>
+  <button id="btnCrear" style="width:100%;margin-top:10px">Crear QR</button>
+</div>
+
+<div class="tarjeta">
+  <h2>3. Tus QR y letreros</h2>
+  <div class="sub">Imprime el letrero o descarga el QR (imagen vectorial: se ve nítida en cualquier tamaño). Prueba siempre el QR con tu celular antes de imprimir muchos.</div>
+  <div id="lista"></div>
+</div>
+</div>
+<div class="pie">Los escaneos se cuentan de forma aproximada. Prototipo sin contraseñas: protege esta página antes de abrir la app a internet.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="/static/comun.js?v=8"></script>
+<script>
+const mapa = crearMapa("mapa");
+const $ = (id) => document.getElementById(id);
+const attr = (s) => esc(s).replace(/"/g, "&quot;");
+let pos = null, marcaNueva = null, marcasLugares = [], ajustesLlenos = false;
+const msg = (id, t) => { $(id).textContent = t; $(id).style.display = "block"; };
+
+function fijarPos(lat, lon) {
+  pos = { lat, lon };
+  if (marcaNueva) marcaNueva.setLatLng([lat, lon]); else marcaNueva = L.marker([lat, lon], { icon: pin("📍", "#7B1E3A") }).addTo(mapa);
+  $("posTexto").textContent = `Ubicación del letrero: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+function quitarPos() {
+  pos = null; if (marcaNueva) { mapa.removeLayer(marcaNueva); marcaNueva = null; }
+  $("posTexto").textContent = "QR general: sin ubicación fija (la persona la marcará con su GPS)";
+}
+mapa.on("click", (e) => fijarPos(e.latlng.lat, e.latlng.lng));
+$("btnLimpiar").onclick = quitarPos;
+$("btnGPS").onclick = () => {
+  if (!navigator.geolocation) return msg("errorLugar", "Tu navegador no ofrece geolocalización. Toca el mapa para marcar el lugar.");
+  navigator.geolocation.getCurrentPosition(
+    (p) => { fijarPos(p.coords.latitude, p.coords.longitude); mapa.setView([p.coords.latitude, p.coords.longitude], 17); },
+    () => msg("errorLugar", "No se pudo obtener tu ubicación. Toca el mapa para marcarla."));
+};
+
+$("btnCrear").onclick = async () => {
+  $("errorLugar").style.display = "none";
+  if (!$("nombre").value.trim()) return msg("errorLugar", "Escribe el nombre del lugar.");
+  try {
+    await api("/api/lugares", "POST", { nombre: $("nombre").value, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null });
+    $("nombre").value = ""; quitarPos(); $("posTexto").textContent = "Ubicación: sin marcar (tócala en el mapa)"; cargar();
+  } catch (e) { msg("errorLugar", e.message); }
+};
+
+$("btnAjustes").onclick = async () => {
+  $("errorAj").style.display = "none"; $("okAj").style.display = "none";
+  try {
+    await api("/api/ajustes", "POST", { url_publica: $("url").value, whatsapp: $("whatsapp").value, telefono: $("telefono").value });
+    ajustesLlenos = false; await cargar();
+    $("okAj").style.display = "block"; setTimeout(() => { $("okAj").style.display = "none"; }, 3000);
+  } catch (e) { msg("errorAj", e.message); }
+};
+
+async function copiar(texto) {
+  try { await navigator.clipboard.writeText(texto); alert("Enlace copiado"); }
+  catch (e) { prompt("Copia el enlace:", texto); }
+}
+
+async function cargar() {
+  const r = await api("/api/lugares");
+  if (!ajustesLlenos) {
+    $("url").value = r.ajustes.url_publica; $("whatsapp").value = r.ajustes.whatsapp; $("telefono").value = r.ajustes.telefono; ajustesLlenos = true;
+  }
+  $("estadoUrl").innerHTML = r.publica
+    ? `<div class="aviso" style="background:#e6f6ee;border-color:#a9dcc4">✅ Los QR apuntan a <b>${esc(r.base_url)}</b>.</div>`
+    : `<div class="alerta"><b>Esta dirección todavía no sirve para QR impresos:</b> ${esc(r.base_url)}<br>
+        Solo funciona en esta computadora o en tu red. Antes de imprimir, publica la app en internet con https y escribe aquí su dirección.</div>`;
+  marcasLugares.forEach((m) => mapa.removeLayer(m));
+  marcasLugares = r.lugares.filter((l) => !l.general).map((l) => L.marker([l.lat, l.lon], { icon: pin("🔳", "#2f6fdb") }).addTo(mapa).bindTooltip(l.nombre));
+  const t = Date.now();
+  $("lista").innerHTML = r.lugares.length ? r.lugares.map((l) => `<div class="lugar">
+      <img src="/qr/${l.codigo}.svg?t=${t}" alt="QR de ${attr(l.nombre)}">
+      <div>
+        <b>${esc(l.nombre)}</b> <span class="chip">${l.general ? "QR general" : "con ubicación"}</span><br>
+        <span class="sub">${l.escaneos} escaneo${l.escaneos === 1 ? "" : "s"} · código ${esc(l.codigo)}${l.general ? "" : ` · ${l.lat.toFixed(5)}, ${l.lon.toFixed(5)}`}</span>
+        <div class="enlace">${esc(l.url)}</div>
+        <div class="botones">
+          <a href="/letrero/${l.codigo}" target="_blank" rel="noopener">🖨️ Imprimir letrero</a>
+          <a href="/qr/${l.codigo}.svg" download="qr-${attr(l.codigo)}.svg">⬇️ Descargar QR</a>
+          <button class="sec" data-copiar="${attr(l.url)}">Copiar enlace</button>
+          <button class="mal" data-borrar="${l.codigo}">Borrar</button>
+        </div>
+      </div></div>`).join("") : '<div class="sub" style="margin-top:8px">Aún no hay QR. Crea el primero arriba.</div>';
+  document.querySelectorAll("[data-copiar]").forEach((b) => b.onclick = () => copiar(b.dataset.copiar));
+  document.querySelectorAll("[data-borrar]").forEach((b) => b.onclick = async () => {
+    if (!confirm("Si ya imprimiste este QR, quien lo escanee llegará a pedir ayuda sin ubicación marcada. ¿Borrarlo?")) return;
+    try { await api(`/api/lugares/${b.dataset.borrar}`, "DELETE"); cargar(); } catch (e) { alert(e.message); }
+  });
+}
+cargar().catch((e) => msg("errorAj", e.message));
+</script></body></html>
