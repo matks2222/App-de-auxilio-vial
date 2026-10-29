@@ -1,7 +1,7 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pedir ayuda</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<link rel="stylesheet" href="/static/estilo.css?v=8"></head><body>
+<link rel="stylesheet" href="/static/estilo.css?v=11"></head><body>
 <script>if (/[?&](lugar|lat|lon)=/.test(location.search)) document.body.setAttribute("data-sin-menu", "");   // quien llega desde un QR no ve enlaces de administración</script>
 <header><h1>Pedir ayuda</h1><a href="/">Inicio</a></header>
 
@@ -15,6 +15,15 @@
     <div class="chips" id="chipsCombustible"></div>
   </div>
 
+  <div id="auto" style="margin-top:14px">
+    <label for="nombre">Tu nombre</label>
+    <input id="nombre" maxlength="40" autocomplete="given-name" placeholder="Nombre" style="font-size:18px">
+    <label for="placa">Placa de tu auto</label>
+    <input id="placa" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Ej. ABC123D" style="text-transform:uppercase;font-size:20px;letter-spacing:2px;font-weight:bold">
+    <label>Color de tu auto</label>
+    <div class="chips" id="chipsColor"></div>
+    <div class="sub" style="margin-top:6px">Así el repartidor sabe a quién busca y reconoce tu auto, y tú sabes quién llega. Solo lo escribes una vez en este teléfono.</div>
+  </div>
   <div id="resumen" class="resumen" style="display:none"></div>
   <div id="error" class="alerta" style="display:none"></div>
   <button id="btnGPS" class="sec" style="width:100%;margin-top:12px">📍 Usar mi ubicación</button>
@@ -32,12 +41,26 @@
 <div class="pie">En una emergencia con riesgo para la vida, llama al 911.</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<script src="/static/comun.js?v=8"></script>
+<script src="/static/comun.js?v=11"></script>
 <script>
 const mapa = crearMapa("mapa", CENTRO, 15);
 const $ = (id) => document.getElementById(id);
 let config = null, pos = null, marcaYo = null, marcaRep = null, sid = localStorage.getItem("sid"), cancelarSub = null, tCot = null;
 let servicio = null, litros = 5, combustible = "magna", otra = false, cotizacion = null;
+let color = localStorage.getItem("auto_color") || "";
+$("placa").value = localStorage.getItem("auto_placa") || "";            // el auto y el nombre se recuerdan en este teléfono
+$("nombre").value = localStorage.getItem("cliente_nombre") || "";
+const nombreValido = () => $("nombre").value.trim().replace(/\s+/g, " ").length >= 2;
+const COLOR_HEX = { blanco: "#ffffff", negro: "#111111", gris: "#8a8a8a", plata: "#c4c7cc", rojo: "#d32f2f", azul: "#1e56c8", verde: "#2e7d32", amarillo: "#fbc02d",
+  naranja: "#ef6c00", "café": "#6d4c41", vino: "#7b1e3a", otro: "linear-gradient(135deg,#d32f2f,#fbc02d,#1e56c8)" };
+const TIPOS_V = { moto: "Moto", auto: "Auto", bicicleta: "Bicicleta", a_pie: "A pie" };
+const placaValida = () => /^[A-Z0-9]{5,8}$/.test($("placa").value.replace(/[\s\-.]/g, "").toUpperCase());
+function pintarColores() {
+  $("chipsColor").innerHTML = config.colores.map((k) => `<button data-k="${k}" class="${color === k ? "elegida" : ""}"><span class="sw" style="background:${COLOR_HEX[k] || "#ccc"}"></span>${k.charAt(0).toUpperCase() + k.slice(1)}</button>`).join("");
+  document.querySelectorAll("#chipsColor button").forEach((b) => b.onclick = () => { color = b.dataset.k; pintarColores(); actualizarResumen(); });
+}
+$("placa").oninput = () => { $("error").style.display = "none"; actualizarResumen(); };
+$("nombre").oninput = () => { $("error").style.display = "none"; actualizarResumen(); };
 
 // ---- Llegada desde un QR (/cliente?lugar=...&lat=...&lon=...): la ubicación del letrero se toma en silencio
 const params = new URLSearchParams(location.search);
@@ -103,6 +126,9 @@ function actualizarResumen() {
     : `Servicio a domicilio (${NOTAS[servicio].toLowerCase()}): <b>${fmtMXN(c.servicio)}</b>`;
   r.innerHTML = `${linea}<br><span class="sub">Precio final, sin cargos extra. Se paga al repartidor.</span>`;
   r.style.display = "block";
+  if (!nombreValido()) { b.disabled = true; b.textContent = "Escribe tu nombre"; return; }
+  if (!placaValida()) { b.disabled = true; b.textContent = "Escribe la placa de tu auto"; return; }
+  if (!color) { b.disabled = true; b.textContent = "Elige el color de tu auto"; return; }
   b.disabled = false; b.textContent = `Pedir ahora · ${fmtMXN(c.total)}`;
 }
 
@@ -131,10 +157,10 @@ $("btnPedir").onclick = async () => {
   if (!pos) { try { await pedirGPS(); } catch (e) { return mostrarError("Necesitamos tu ubicación: actívala en el celular o toca el mapa donde estás."); } }
   $("btnPedir").disabled = true;
   try {
-    const cuerpo = { lat: pos.lat, lon: pos.lon, tipo: servicio, lugar: lugarQR };
+    const cuerpo = { lat: pos.lat, lon: pos.lon, tipo: servicio, lugar: lugarQR, nombre: $("nombre").value, placa: $("placa").value, color };
     if (servicio === "gasolina") { cuerpo.opcion = combustible; cuerpo.cantidad = litros; }
     const r = await api("/api/solicitudes", "POST", cuerpo);
-    sid = r.id; localStorage.setItem("sid", sid); iniciar();
+    sid = r.id; localStorage.setItem("sid", sid); localStorage.setItem("auto_placa", $("placa").value.toUpperCase()); localStorage.setItem("cliente_nombre", $("nombre").value.trim()); localStorage.setItem("auto_color", color); iniciar();
   } catch (e) { mostrarError(e.message); $("btnPedir").disabled = false; }
 };
 
@@ -143,6 +169,18 @@ function iniciar() {
   $("formulario").style.display = "none"; $("seguimiento").style.display = "block";
   if (cancelarSub) cancelarSub();
   cancelarSub = suscribir("cliente", sid, pintar);
+}
+// Quién llega: nombre, vehículo y placa, para que el cliente confirme que es la persona correcta antes de entregarle nada
+function vehiculoHtml(m) {
+  const v = m && m.vehiculo;
+  if (!v) return "";
+  const placa = v.placa ? ` · Placa <b style="font-size:18px;letter-spacing:1px">${esc(v.placa)}</b>` : "";
+  return `<div class="aviso" style="margin-top:10px">🚦 <b>${esc(m.nombre)}</b> · ${esc(TIPOS_V[v.tipo] || "Vehículo")}${v.modelo ? " " + esc(v.modelo) : ""} · ${esc(v.color)}${placa}<br><span class="sub">Antes de entregarle nada, confirma que el nombre, el vehículo y la placa coinciden.</span></div>`;
+}
+// El PIN es la contraseña de este pedido: el repartidor lo necesita para marcar que llegó. Se muestra solo mientras viene en camino.
+function pinHtml(s) {
+  if (!s.pin) return "";
+  return `<div class="aviso" style="margin-top:10px;text-align:center;background:#eaf3ff;border-color:#b6d3f5"><span class="sub">Tu PIN de seguridad</span><div style="font-size:38px;font-weight:bold;letter-spacing:10px;margin:4px 0">${esc(s.pin)}</div><span class="sub">Díselo al repartidor <b>solo cuando llegue</b> y hayas confirmado su nombre y su placa. No lo compartas antes.</span></div>`;
 }
 function pintar(snap) {
   const s = snap.solicitud;
@@ -162,7 +200,7 @@ function pintar(snap) {
   const textos = {                              // mensajes cortos; nunca se habla de "buscar" repartidor
     pendiente: ["Recibimos tu pedido", "Te avisamos aquí en cuanto alguien salga hacia ti."],
     ofertada: ["Recibimos tu pedido", "Te avisamos aquí en cuanto alguien salga hacia ti."],
-    aceptada: [m ? `${esc(m.nombre)} va en camino` : "Ya va en camino", `Llega en ${fmtEta(s.eta_s)}`],
+    aceptada: [m ? `${m.nombre} va en camino` : "Ya va en camino", `Llega en ${fmtEta(s.eta_s)}`],
     en_sitio: ["Ya llegó", "Está atendiendo tu pedido."],
     terminada: ["Listo ✓", ""],
     cancelada: sinCobertura ? ["Ahora no pudimos enviar a nadie", "Lo sentimos. Llámanos o escríbenos y te ayudamos."] : ["Pedido cancelado", ""],
@@ -171,7 +209,8 @@ function pintar(snap) {
   $("estadoTexto").textContent = t;
   const c = s.cotizacion;
   const resumen = c ? `<div style="margin-top:8px">🧾 ${esc(c.concepto)} · <b>${fmtMXN(c.total)}</b><br><span class="sub">Se paga al repartidor.</span></div>` : "";
-  $("detalle").innerHTML = `${d}${s.estado === "cancelada" && !sinCobertura ? "" : resumen}`;
+  const veh = ["aceptada", "en_sitio"].includes(s.estado) ? vehiculoHtml(m) : "";
+  $("detalle").innerHTML = `${d}${veh}${pinHtml(s)}${s.estado === "cancelada" && !sinCobertura ? "" : resumen}`;
   const a = $("acciones");
   if (["pendiente", "ofertada", "aceptada", "en_sitio"].includes(s.estado)) {
     a.innerHTML = `<button class="mal" id="btnCancelar">Cancelar pedido</button>`;
@@ -199,7 +238,7 @@ function mostrarContacto(c) {
 api("/api/config").then((c) => {
   config = c; mostrarContacto(c.contacto);
   $("litros").min = c.litros.min; $("litros").max = c.litros.max;
-  pintarOpciones(); actualizarResumen();
+  pintarOpciones(); pintarColores(); actualizarResumen();
 }).catch(() => mostrarError("No pudimos cargar la página. Revisa tu conexión e inténtalo de nuevo."));
 
 if (sid) iniciar();

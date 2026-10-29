@@ -14,10 +14,12 @@ Ciclo de una solicitud:
 Los eventos se guardan en SQLite para calibrar después el simulador con datos reales.
 """
 import copy
+import hmac
 import json
 import math
 import random
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -28,6 +30,8 @@ from urllib.parse import urlparse
 import numpy as np
 
 from . import motor
+
+MAX_PIN_INTENTOS = 5          # intentos de PIN por pedido antes de bloquear la llegada
 
 CENTRO = (19.3727, -99.1587)   # centro de demostración (alcaldía Benito Juárez, CDMX)
 TALLERES_DEMO = [(0.010, -0.012, "Norte"), (-0.011, 0.009, "Sur"), (0.004, 0.018, "Este"), (-0.003, -0.020, "Oeste")]
@@ -72,7 +76,7 @@ class Estado:
             self.version = 0
             self.config = dict(politica="hungaro", ventana_s=5.0, oferta_s=30.0, vel_kmh=18.0, radio_km=5.0,
                                rechazo_bot=0.10, vel_bot_ms=25.0, servicio_bot_s=(8.0, 15.0), prob_escalar=0.30,
-                               radio_taller_km=15.0, reoferta_s=120.0, espera_max_s=900.0, demo_en_cotizacion=False,
+                               radio_taller_km=15.0, reoferta_s=120.0, espera_max_s=900.0, demo_en_cotizacion=False, requiere_pin=True,
                                servicios_activos=list(motor.ACTIVOS),
                                precios=self._cargar("precios", motor.PRECIOS_DEFAULT))
             self.costos = self._cargar("costos", motor.COSTOS_DEFAULT)      # precios y costos sobreviven a «Reiniciar todo»
@@ -439,13 +443,14 @@ class Estado:
 
     # ------------------------------------------------------------------ solicitudes
     def crear_solicitud(self, nombre, lat, lon, tipo, via="calle", notas="", riesgo=False, padre_id=None,
-                        opcion=None, cantidad=None, lugar=""):
+                        opcion=None, cantidad=None, lugar="", placa=None, color=None):
         if tipo not in motor.TIPOS:
             raise ValueError("Tipo de falla no válido")
         if via not in motor.VIAS:
             raise ValueError("Tipo de vía no válido")
         with self.lock:
             cotizacion = self.cotizar(tipo, lat, lon, opcion, cantidad)       # el precio lo fija el servidor, no el cliente
+            vehiculo = None if placa is None and color is None else dict(placa=motor.normalizar_placa(placa), color=motor.validar_color(color))
             hora = time.localtime(self.reloj()).tm_hour
             nivel, razones = motor.prioridad(tipo, via, hora, riesgo)
             if padre_id and nivel < 3:                                  # ya esperó atención previa: sube la prioridad
@@ -455,7 +460,8 @@ class Estado:
                      via=via, notas=notas[:300], riesgo=bool(riesgo), prioridad=nivel, razones=razones, estado="pendiente",
                      t_creada=self.reloj(), t_aceptada=None, t_llegada=None, t_fin=None, repartidor_id=None, excluidos=[], excluido_hasta={},
                      oferta_expira=None, eta_s=None, calificacion=None, comentario="", padre_id=padre_id, hija_id=None,
-                     resultado=None, diagnostico="", cotizacion=cotizacion,
+                     resultado=None, diagnostico="", cotizacion=cotizacion, vehiculo=vehiculo,
+                     pin=f"{secrets.randbelow(10000):04d}", pin_intentos=0, pin_obligatorio=bool(self.config.get("requiere_pin", True)),
                      lugar=(lugar or "").strip()[:60])
             self.solicitudes[sid] = s
             self.evento("solicitud_creada", sid, tipo=tipo, prioridad=nivel, via=via, padre=padre_id,
@@ -484,9 +490,22 @@ class Estado:
             self.evento("calificacion", sid, s["repartidor_id"], estrellas=estrellas)
 
     # ------------------------------------------------------------------ prestadores (repartidor, grúa)
-    def registrar_repartidor(self, nombre, habilidades, bot=False, lat=None, lon=None, prestador="repartidor"):
+    @staticmethod
+    def _vehiculo_repartidor(v):
+        """Valida el vehículo de un repartidor: tipo, color y placa (la placa no aplica a bicicleta ni a pie)."""
+        if v is None:
+            return None
+        tipo = (v.get("tipo") or "").strip().lower()
+        if tipo not in motor.TIPOS_VEHICULO:
+            raise ValueError("Elige tu tipo de vehículo")
+        placa = "" if tipo in motor.SIN_PLACA else motor.normalizar_placa(v.get("placa"))
+        modelo = "" if tipo in motor.SIN_PLACA else motor.validar_modelo(v.get("modelo"))
+        return dict(tipo=tipo, color=motor.validar_color(v.get("color")), placa=placa, modelo=modelo)
+
+    def registrar_repartidor(self, nombre, habilidades, bot=False, lat=None, lon=None, prestador="repartidor", vehiculo=None):
         if prestador not in motor.PRESTADORES:
             raise ValueError("Tipo de prestador no válido")
+        vehiculo = self._vehiculo_repartidor(vehiculo)
         hab = [h for h in habilidades if h in motor.PRESTADORES[prestador]["permitidas"]]
         if not hab:
             raise ValueError("Elige al menos un servicio que puedas dar")
@@ -494,7 +513,7 @@ class Estado:
             mid = _nuevo_id()
             self.repartidores[mid] = dict(id=mid, nombre=(nombre or motor.PRESTADORES[prestador]["nombre"])[:60], habilidades=hab,
                                        prestador=prestador, bot=bot, estado="fuera", lat=lat, lon=lon, solicitud_id=None,
-                                       servicios=0, _acepta_en=None, _servicio_hasta=None)
+                                       servicios=0, _acepta_en=None, _servicio_hasta=None, vehiculo=vehiculo)
             self.evento("prestador_registrado", mid=mid, bot=bot, prestador=prestador)
             return self.repartidores[mid]
 
@@ -586,8 +605,8 @@ class Estado:
         t["ventas"].insert(0, dict(solicitud_id=s["id"], concepto=c["concepto"], subtotal=c["subtotal"], total=c["total"], t=self.reloj()))
         del t["ventas"][50:]
 
-    def avanzar(self, mid, accion, nota=""):
-        """Acciones del prestador: llegue, termine, escalar_grua."""
+    def avanzar(self, mid, accion, nota="", pin=None):
+        """Acciones del prestador: llegue (con el PIN que le da el cliente), termine, escalar_grua."""
         with self.lock:
             m = self._m(mid)
             if m["estado"] != "ocupado" or not m["solicitud_id"]:
@@ -595,6 +614,16 @@ class Estado:
             s = self.solicitudes[m["solicitud_id"]]
             ahora = self.reloj()
             if accion == "llegue" and s["estado"] == "aceptada":
+                if s.get("pin_obligatorio"):
+                    # El PIN lo ve solo el cliente y se lo da al repartidor cuando este llega: sin él no se puede marcar la llegada,
+                    # así que nadie cobra por un servicio sin estar con el cliente, ni un impostor puede empezar un pedido ajeno.
+                    if s["pin_intentos"] >= MAX_PIN_INTENTOS:
+                        raise ValueError("Demasiados intentos con el PIN. Avisa al cliente para que cancele o llama al administrador.")
+                    if not hmac.compare_digest(str(pin or "").strip(), s["pin"]):
+                        s["pin_intentos"] += 1
+                        self.evento("pin_incorrecto", s["id"], mid, intentos=s["pin_intentos"])
+                        quedan = MAX_PIN_INTENTOS - s["pin_intentos"]
+                        raise ValueError("PIN incorrecto. Pídeselo al cliente." + (f" Te quedan {quedan} intentos." if quedan else " Ya no te quedan intentos."))
                 s["estado"], s["t_llegada"] = "en_sitio", ahora
                 self.evento("prestador_llego", s["id"], mid, espera_s=ahora - s["t_creada"])
             elif accion == "termine" and s["estado"] == "en_sitio":
@@ -612,7 +641,8 @@ class Estado:
                 self._liberar(m, s)
                 hija = self.crear_solicitud(s["nombre"], s["lat"], s["lon"], destino, s["via"],
                                             f"Escalada desde la solicitud {s['id']}. Diagnóstico: {nota[:200] or 'falla mayor'}",
-                                            s["riesgo"], padre_id=s["id"], lugar=s["lugar"])
+                                            s["riesgo"], padre_id=s["id"], lugar=s["lugar"],
+                                            **(dict(placa=s["vehiculo"]["placa"], color=s["vehiculo"]["color"]) if s.get("vehiculo") else {}))
                 s["hija_id"] = hija["id"]
                 self.evento("solicitud_escalada", s["id"], mid, destino=destino, hija=hija["id"], nivel=s["nivel"])
             else:
@@ -699,7 +729,7 @@ class Estado:
                         paso = self.config["vel_bot_ms"] * dt
                         if d <= max(paso, 25):
                             m["lat"], m["lon"] = s["lat"], s["lon"]
-                            self.avanzar(m["id"], "llegue")
+                            self.avanzar(m["id"], "llegue", pin=s["pin"])        # los repartidores simulados conocen el PIN
                             m["_servicio_hasta"] = ahora + self.rng.uniform(*self.config["servicio_bot_s"])
                         else:
                             f = paso / d
@@ -733,7 +763,9 @@ class Estado:
                 if prestador == "repartidor" and self.rng.random() < 0.35:
                     hab.append("bateria_nueva")
                 lat, lon = self._punto_aleatorio()
-                m = self.registrar_repartidor(f"{prestador.capitalize()} {base + k + 1} (sim.)", hab, bot=True, lat=lat, lon=lon, prestador=prestador)
+                n = base + k + 1
+                m = self.registrar_repartidor(f"{prestador.capitalize()} {n} (sim.)", hab, bot=True, lat=lat, lon=lon, prestador=prestador,
+                                              vehiculo=dict(tipo="moto", color=motor.COLORES[n % len(motor.COLORES)], placa=f"SIM{n:03d}", modelo="Simulada 150"))
                 self.turno(m["id"], True)
 
     def quitar_bots(self):
@@ -746,7 +778,8 @@ class Estado:
         lat, lon = self._punto_aleatorio()
         tipo = self.rng.choice(list(self.config["servicios_activos"]))
         via = self.rng.choices(list(motor.VIAS), weights=[55, 30, 15])[0]
-        return self.crear_solicitud(f"Prueba {self.rng.randint(100, 999)}", lat, lon, tipo, via)
+        n = self.rng.randint(100, 999)
+        return self.crear_solicitud(f"Prueba {n}", lat, lon, tipo, via, placa=f"PRB{n}", color=motor.COLORES[n % len(motor.COLORES)])
 
     # ------------------------------------------------------------------ vistas para la interfaz
     def _pub_solicitud(self, s):
@@ -767,7 +800,8 @@ class Estado:
     def _pub_repartidor(self, m):
         return dict(id=m["id"], nombre=m["nombre"], habilidades=m["habilidades"], prestador=m["prestador"],
                     nivel=motor.PRESTADORES[m["prestador"]]["nivel"], estado=m["estado"], lat=m["lat"], lon=m["lon"],
-                    bot=m["bot"], servicios=m["servicios"], solicitud_id=m["solicitud_id"], opciones_escalar=self.opciones_escalar(m))
+                    bot=m["bot"], servicios=m["servicios"], solicitud_id=m["solicitud_id"], opciones_escalar=self.opciones_escalar(m),
+                    vehiculo=m.get("vehiculo"))
 
     def _espera(self, m):
         """Pedidos pendientes que este repartidor podría atender: dentro de su radio, fuera de él, o en pausa por un rechazo reciente."""
@@ -791,6 +825,8 @@ class Estado:
             activos = [self._pub_solicitud(s) for s in self.solicitudes.values()
                        if s.get("cotizacion") and s["cotizacion"]["taller"] and s["cotizacion"]["taller"]["id"] == t["id"]
                        and s["estado"] in ("pendiente", "ofertada", "aceptada", "en_sitio")]
+            for a in activos:
+                a["nombre"] = ""                                      # el taller ve qué debe surtir, no quién es el cliente
             d.update(ventas=t["ventas"], total_vendido=round(sum(v["total"] for v in t["ventas"]), 2), pedidos_activos=activos)
         return d
 
@@ -801,16 +837,24 @@ class Estado:
                 if not s:
                     return dict(rol=rol, solicitud=None, repartidor=None)
                 m = self.repartidores.get(s["repartidor_id"]) if s["repartidor_id"] and s["estado"] in ("aceptada", "en_sitio") else None
-                return dict(rol=rol, solicitud=self._pub_solicitud(s),
+                sol = self._pub_solicitud(s)
+                if s["estado"] == "aceptada":
+                    sol["pin"] = s["pin"]            # el PIN solo lo ve el cliente, y solo hasta que el repartidor llega
+                return dict(rol=rol, solicitud=sol,
                             repartidor=dict(nombre=m["nombre"], prestador=m["prestador"], lat=m["lat"], lon=m["lon"],
-                                            habilidades=m["habilidades"]) if m else None)
+                                            habilidades=m["habilidades"], vehiculo=m.get("vehiculo")) if m else None)
             if rol in ("repartidor", "prestador", "mecanico"):         # "mecanico" se acepta solo por compatibilidad
                 m = self.repartidores.get(id_)
                 if not m:
                     return dict(rol=rol, repartidor=None, solicitud=None)
                 s = self.solicitudes.get(m["solicitud_id"]) if m["solicitud_id"] else None
-                return dict(rol=rol, repartidor=dict(self._pub_repartidor(m), espera=self._espera(m)),
-                            solicitud=self._pub_solicitud(s) if s else None)
+                sol = self._pub_solicitud(s) if s else None
+                if sol:
+                    sol["nombre"] = ""                                # el nombre del cliente solo se ve tras aceptar, no en la oferta
+                if s and s["estado"] in ("aceptada", "en_sitio") and s["repartidor_id"] == m["id"]:
+                    sol["vehiculo_cliente"] = s.get("vehiculo")       # la placa del cliente solo se ve tras aceptar, no en la oferta
+                    sol["cliente_nombre"] = s["nombre"]
+                return dict(rol=rol, repartidor=dict(self._pub_repartidor(m), espera=self._espera(m)), solicitud=sol)
             if rol == "taller":
                 t = self.talleres.get(id_)
                 return dict(rol=rol, taller=self._pub_taller(t, privado=True) if t else None)

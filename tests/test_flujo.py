@@ -28,6 +28,10 @@ def punto(km_este=0.0, km_norte=0.0):
     return LAT0 + km_norte / 111.32, LON0 + km_este * KM_LON
 
 
+AUTO = {"nombre": "Ana Torres", "placa": "ABC123D", "color": "blanco"}                    # el auto del cliente: ahora es obligatorio al pedir
+VEH = {"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"}       # el vehículo de un repartidor
+
+
 @pytest.fixture
 def est():
     r = Reloj()
@@ -59,7 +63,7 @@ def sol(est, km=(1, 0), tipo="paso_de_corriente", via="calle"):
 def atender(est, m, s, accion="termine", nota=""):
     est.paso_despacho()
     est.responder_oferta(m["id"], s["id"], True)
-    est.avanzar(m["id"], "llegue")
+    est.avanzar(m["id"], "llegue", pin=est.solicitudes[m["solicitud_id"]]["pin"])
     est.avanzar(m["id"], accion, nota)
 
 
@@ -72,7 +76,7 @@ def test_flujo_completo(est):
     est.responder_oferta(m["id"], s["id"], True)
     assert s["estado"] == "aceptada" and m["estado"] == "ocupado"
     est.r.t += 300
-    est.avanzar(m["id"], "llegue")
+    est.avanzar(m["id"], "llegue", pin=est.solicitudes[m["solicitud_id"]]["pin"])
     assert s["estado"] == "en_sitio" and s["t_llegada"] - s["t_creada"] == 300
     est.avanzar(m["id"], "termine")
     assert s["estado"] == "terminada" and s["resultado"] == "resuelta" and m["estado"] == "libre" and m["servicios"] == 1
@@ -221,7 +225,7 @@ def test_opciones_de_escalamiento_por_nivel(est):
     assert est.opciones_escalar(a) == ["escalar_grua"]
     assert est.opciones_escalar(g) == []
     s = sol(est, tipo="grua")
-    est.paso_despacho(); est.responder_oferta(g["id"], s["id"], True); est.avanzar(g["id"], "llegue")
+    est.paso_despacho(); est.responder_oferta(g["id"], s["id"], True); est.avanzar(g["id"], "llegue", pin=est.solicitudes[g["solicitud_id"]]["pin"])
     with pytest.raises(ValueError):
         est.avanzar(g["id"], "escalar_grua")                      # la grúa ya es el último nivel
 
@@ -468,13 +472,13 @@ def test_api_y_websocket():
     assert cfg["precios"]["combustibles"]["magna"]["litro"] > 0 and set(cfg["precios"]["servicios"]) >= set(cfg["tipos"])
     for ruta in ["/", "/cliente", "/repartidor", "/prestador", "/mecanico", "/taller", "/qr", "/negocio", "/panel"]:
         assert c.get(ruta).status_code == 200
-    r = c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["aire_llantas", "paso_de_corriente", "grua", "diagnostico"], "prestador": "repartidor"})
+    r = c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["aire_llantas", "paso_de_corriente", "grua", "diagnostico"], "prestador": "repartidor", "vehiculo": VEH})
     mid = r.json()["id"]
     assert c.get(f"/api/repartidores/{mid}").json()["repartidor"]["habilidades"] == ["aire_llantas", "paso_de_corriente"]
     lat, lon = punto(0, 0)
     assert c.post(f"/api/repartidores/{mid}/turno", json={"activo": True, "lat": lat, "lon": lon}).status_code == 200
     la, lo = punto(1, 1)
-    r = c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": "aire_llantas"})            # sin nombre, vía ni notas: lo mínimo
+    r = c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": "aire_llantas", **AUTO})            # sin nombre, vía ni notas: lo mínimo
     sid = r.json()["id"]
     assert r.json()["cotizacion"]["total"] == cfg["precios"]["servicios"]["aire_llantas"]
     from app.main import estado
@@ -484,7 +488,7 @@ def test_api_y_websocket():
     assert c.post(f"/api/repartidores/{mid}/respuesta", json={"solicitud_id": sid, "acepta": True}).status_code == 200
     cli = c.get(f"/api/solicitudes/{sid}").json()
     assert cli["solicitud"]["estado"] == "aceptada" and cli["repartidor"]["nombre"] == "Luis"
-    assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue"}).status_code == 200
+    assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue", "pin": estado.solicitudes[sid]["pin"]}).status_code == 200
     assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "termine"}).status_code == 200
     assert c.get(f"/api/solicitudes/{sid}").json()["solicitud"]["estado"] == "terminada"
     with c.websocket_connect(f"/ws?rol=cliente&id={sid}") as ws:
@@ -492,12 +496,12 @@ def test_api_y_websocket():
     # validaciones
     for apagado in ("diagnostico", "grua", "bateria_nueva", "cambio_de_llanta"):
         assert c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": apagado}).status_code == 400, apagado
-    assert c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": "inventado"}).status_code == 400
-    assert c.post("/api/solicitudes", json={"lat": 999, "lon": lo, "tipo": "gasolina"}).status_code == 422
+    assert c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": "inventado", **AUTO}).status_code == 400
+    assert c.post("/api/solicitudes", json={"lat": 999, "lon": lo, "tipo": "gasolina", **AUTO}).status_code == 422
     assert c.get("/api/solicitudes/noexiste").status_code == 404
     assert c.post(f"/api/repartidores/{mid}/respuesta", json={"solicitud_id": sid, "acepta": True}).status_code == 400
-    assert c.post("/api/repartidores", json={"habilidades": ["grua"], "prestador": "repartidor"}).status_code == 400
-    assert c.post("/api/repartidores", json={"habilidades": ["aire_llantas"], "prestador": "mecanico"}).status_code == 400
+    assert c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["grua"], "prestador": "repartidor", "vehiculo": VEH}).status_code == 400
+    assert c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "mecanico", "vehiculo": VEH}).status_code == 400
     assert c.post("/api/panel/config", json={"politica": "xx"}).status_code == 400
     assert c.post("/api/panel/config", json={"politica": "voraz", "espera_max_s": 600, "reoferta_s": 60}).status_code == 200
     cfgp = c.get("/api/panel/estado").json()["config"]
@@ -511,13 +515,13 @@ def test_api_escalada_cuando_se_reactivan_los_demas_servicios(monkeypatch):
     from app.main import estado
     monkeypatch.setitem(estado.config, "servicios_activos", list(motor.TIPOS))
     c = TestClient(app)
-    mid = c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["diagnostico"], "prestador": "repartidor"}).json()["id"]
+    mid = c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["diagnostico"], "prestador": "repartidor", "vehiculo": VEH}).json()["id"]
     lat, lon = punto(0, 0)
     c.post(f"/api/repartidores/{mid}/turno", json={"activo": True, "lat": lat, "lon": lon})
-    sid = c.post("/api/solicitudes", json={"lat": lat, "lon": lon, "tipo": "diagnostico", "via": "avenida"}).json()["id"]
+    sid = c.post("/api/solicitudes", json={"lat": lat, "lon": lon, "tipo": "diagnostico", **AUTO, "via": "avenida"}).json()["id"]
     estado.paso_despacho()
     assert c.post(f"/api/repartidores/{mid}/respuesta", json={"solicitud_id": sid, "acepta": True}).status_code == 200
-    c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue"})
+    c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue", "pin": estado.solicitudes[sid]["pin"]})
     assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "escalar_grua", "nota": "No arranca"}).status_code == 200
     padre = c.get(f"/api/solicitudes/{sid}").json()["solicitud"]
     hija = c.get(f"/api/solicitudes/{padre['hija_id']}").json()["solicitud"]
@@ -573,7 +577,7 @@ def test_negocio_aprende_los_tiempos_reales_y_excluye_los_simulados(est):
     est.paso_despacho()
     est.r.t += 60                                                    # el cliente esperó 1 min a que alguien aceptara
     est.responder_oferta(m["id"], s["id"], True)
-    est.r.t += 600; est.avanzar(m["id"], "llegue")                   # 10 min de camino
+    est.r.t += 600; est.avanzar(m["id"], "llegue", pin=est.solicitudes[m["solicitud_id"]]["pin"])                   # 10 min de camino
     est.r.t += 300; est.avanzar(m["id"], "termine")                  # 5 min de servicio
     r = est.tiempos_reales()["aire_llantas"]
     assert r["n"] == 1 and abs(r["viaje_min"] - 10) < 1e-9 and abs(r["servicio_min"] - 5) < 1e-9 and abs(r["total_min"] - 15) < 1e-9 and abs(r["espera_min"] - 1) < 1e-9
@@ -587,7 +591,7 @@ def test_negocio_aprende_los_tiempos_reales_y_excluye_los_simulados(est):
     bot = next(x for x in est.repartidores.values() if x["bot"])
     bot["habilidades"] = ["paso_de_corriente"]
     s2 = sol(est, km=(0.1, 0), tipo="paso_de_corriente")
-    est.paso_despacho(); est.responder_oferta(bot["id"], s2["id"], True); est.avanzar(bot["id"], "llegue"); est.avanzar(bot["id"], "termine")
+    est.paso_despacho(); est.responder_oferta(bot["id"], s2["id"], True); est.avanzar(bot["id"], "llegue", pin=est.solicitudes[bot["solicitud_id"]]["pin"]); est.avanzar(bot["id"], "termine")
     assert "paso_de_corriente" not in est.tiempos_reales() and est.negocio()["resumen"]["simulados"] == 1
 
 
@@ -705,7 +709,7 @@ def test_es_publica():
         assert not es_publica(no), no
     c = TestClient(app)
     c.post("/api/panel/solicitud_aleatoria")
-    s = c.post("/api/solicitudes", json={"lat": LAT0, "lon": LON0, "tipo": "aire_llantas", "lugar": "Gasolinera Centro"}).json()["id"]
+    s = c.post("/api/solicitudes", json={"lat": LAT0, "lon": LON0, "tipo": "aire_llantas", **AUTO, "lugar": "Gasolinera Centro"}).json()["id"]
     assert c.get(f"/api/solicitudes/{s}").json()["solicitud"]["lugar"] == "Gasolinera Centro"
 
 
@@ -750,7 +754,7 @@ def test_modo_publico_deja_abierto_lo_que_necesita_el_cliente(publico):
     assert "Pedir ayuda" in c.get("/").text and "Panel de demostración" not in c.get("/").text            # / es la pantalla del cliente
     l = estado_lugar()
     assert c.get(f"/q/{l}", follow_redirects=False).status_code == 302
-    r = c.post("/api/solicitudes", json={"lat": lat, "lon": lon, "tipo": "aire_llantas"})
+    r = c.post("/api/solicitudes", json={"lat": lat, "lon": lon, "tipo": "aire_llantas", **AUTO})
     assert r.status_code == 200
     sid = r.json()["id"]
     assert len(sid) == 12 and c.get(f"/api/solicitudes/{sid}").status_code == 200 and c.post(f"/api/solicitudes/{sid}/cancelar").status_code == 200
@@ -823,7 +827,7 @@ def test_websocket_del_panel_solo_para_el_dueno(publico):
 def test_registro_de_repartidores_y_talleres_pide_el_codigo(publico):
     c = publico
     lat, lon = punto(0, 0)
-    rep = {"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "repartidor"}
+    rep = {"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "repartidor", "vehiculo": VEH}
     tal = {"nombre": "Taller", "lat": lat, "lon": lon}
     assert c.post("/api/repartidores", json=rep).status_code == 403
     assert c.post("/api/repartidores", json={**rep, "codigo": "mal"}).status_code == 403
@@ -833,7 +837,7 @@ def test_registro_de_repartidores_y_talleres_pide_el_codigo(publico):
 
 
 def test_adivinar_el_codigo_tiene_limite(publico):
-    rep = {"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "repartidor"}
+    rep = {"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "repartidor", "vehiculo": VEH}
     for i in range(10):
         assert publico.post("/api/repartidores", json={**rep, "codigo": f"x{i}"}).status_code == 403
     assert publico.post("/api/repartidores", json={**rep, "codigo": "cod-colab"}).status_code == 429
@@ -842,13 +846,13 @@ def test_adivinar_el_codigo_tiene_limite(publico):
 def test_sin_codigo_configurado_cualquiera_puede_registrarse(monkeypatch):
     monkeypatch.delenv("CODIGO_COLABORADORES", raising=False)
     c = TestClient(app)
-    assert c.post("/api/repartidores", json={"habilidades": ["aire_llantas"]}).status_code == 200 and c.get("/api/config").json()["requiere_codigo"] is False
+    assert c.post("/api/repartidores", json={"nombre": "Luis Pérez", "habilidades": ["aire_llantas"], "vehiculo": VEH}).status_code == 200 and c.get("/api/config").json()["requiere_codigo"] is False
 
 
 def test_limite_de_pedidos_por_conexion(publico, monkeypatch):
     monkeypatch.setenv("LIMITE_PEDIDOS_HORA", "2")
     lat, lon = punto(0, 0)
-    cuerpo = {"lat": lat, "lon": lon, "tipo": "aire_llantas"}
+    cuerpo = {"lat": lat, "lon": lon, "tipo": "aire_llantas", **AUTO}
     assert publico.post("/api/solicitudes", json=cuerpo).status_code == 200 and publico.post("/api/solicitudes", json=cuerpo).status_code == 200
     r = publico.post("/api/solicitudes", json=cuerpo)
     assert r.status_code == 429 and "llámanos" in r.json()["detail"]
@@ -920,3 +924,241 @@ def test_un_login_fallido_deja_un_registro_con_el_largo_pero_no_el_valor(publico
         publico.post("/api/login", json={"password": "mala-clave"})
     msg = " ".join(r.getMessage() for r in caplog.records)
     assert "10 caracteres" in msg and "15 caracteres" not in msg.split("tiene")[0] and "mala-clave" not in msg and "clave-larga-123" not in msg
+
+
+# ------------------------------------------------------------------ identificación: placas y colores
+def test_normalizar_placa_y_validar_color():
+    assert motor.normalizar_placa(" abc-123 d ") == "ABC123D" and motor.normalizar_placa("1ab.23") == "1AB23"
+    for mala in ["", "AB1", "ABCDEFGHI", "AB#123", "ÑAB123"]:
+        with pytest.raises(ValueError):
+            motor.normalizar_placa(mala)
+    assert motor.validar_color(" Blanco ") == "blanco" and motor.validar_color("CAFÉ") == "café"
+    for malo in ["", "morado fosforescente", "<b>rojo</b>"]:
+        with pytest.raises(ValueError):
+            motor.validar_color(malo)
+
+
+def test_el_pedido_guarda_la_placa_y_el_color_normalizados(est):
+    lat, lon = punto(0, 0)
+    s = est.crear_solicitud("Ana", lat, lon, "aire_llantas", placa="abc-123d", color="Rojo")
+    assert s["vehiculo"] == {"placa": "ABC123D", "color": "rojo"}
+    for malo in [dict(placa="x", color="rojo"), dict(placa="ABC123", color="turquesa"), dict(placa="ABC123", color="")]:
+        with pytest.raises(ValueError):
+            est.crear_solicitud("Ana", lat, lon, "aire_llantas", **malo)
+
+
+def test_el_vehiculo_del_repartidor_se_valida(est):
+    m = est.registrar_repartidor("Beto", ["aire_llantas"], vehiculo={"tipo": "Moto", "color": "negro", "placa": "xy-z98", "modelo": "  Italika   FT150 "})
+    assert m["vehiculo"] == {"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"}
+    b = est.registrar_repartidor("Lalo", ["aire_llantas"], vehiculo={"tipo": "bicicleta", "color": "azul", "placa": ""})
+    assert b["vehiculo"]["placa"] == ""                                    # en bicicleta o a pie no hay placa que pedir
+    for malo in [{"tipo": "moto", "color": "negro", "placa": ""}, {"tipo": "tanque", "color": "negro", "placa": "ABC123"},
+                 {"tipo": "auto", "color": "invisible", "placa": "ABC123"}, {"tipo": "", "color": "negro", "placa": "ABC123"}]:
+        with pytest.raises(ValueError):
+            est.registrar_repartidor("X", ["aire_llantas"], vehiculo=malo)
+
+
+def test_cada_parte_ve_los_datos_de_la_otra_solo_despues_de_aceptar(est):
+    est.talleres.clear()
+    m = est.registrar_repartidor("Beto", ["aire_llantas"], vehiculo={"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"})
+    lat, lon = punto(0, 0)
+    est.turno(m["id"], True, *punto(0.5, 0))
+    s = est.crear_solicitud("Ana", lat, lon, "aire_llantas", placa="ABC123D", color="blanco")
+    est.paso_despacho()
+    # en la oferta: el repartidor todavía NO ve la placa del cliente, y el cliente todavía NO ve al repartidor
+    oferta = est.snapshot("repartidor", m["id"])
+    assert oferta["solicitud"]["estado"] == "ofertada" and "vehiculo_cliente" not in oferta["solicitud"]
+    assert est.snapshot("cliente", s["id"])["repartidor"] is None
+    est.responder_oferta(m["id"], s["id"], True)
+    # aceptado: ahora sí, ambos se pueden reconocer
+    rep_ve = est.snapshot("repartidor", m["id"])["solicitud"]
+    assert rep_ve["vehiculo_cliente"] == {"placa": "ABC123D", "color": "blanco"}
+    cli_ve = est.snapshot("cliente", s["id"])["repartidor"]
+    assert cli_ve["nombre"] == "Beto" and cli_ve["vehiculo"] == {"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"}
+    est.avanzar(m["id"], "llegue", pin=est.solicitudes[m["solicitud_id"]]["pin"])
+    assert est.snapshot("cliente", s["id"])["repartidor"]["vehiculo"]["placa"] == "XYZ98"
+    est.avanzar(m["id"], "termine")
+    assert est.snapshot("cliente", s["id"])["repartidor"] is None          # al terminar ya no se ve
+    assert "vehiculo_cliente" not in (est.snapshot("repartidor", m["id"])["solicitud"] or {})
+
+
+def test_la_placa_del_cliente_no_se_filtra_a_otros(est):
+    est.talleres.clear()
+    t = est.agregar_taller("Gasolinera", *punto(0, 0))
+    est.actualizar_catalogo(t["id"], {"magna": {"litro": 24, "disponible": True}}, [])
+    m = est.registrar_repartidor("Beto", ["gasolina"], vehiculo={"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"})
+    otro = est.registrar_repartidor("Otro", ["gasolina"], vehiculo={"tipo": "moto", "color": "rojo", "placa": "OTR123", "modelo": "Vento Z"})
+    est.turno(m["id"], True, *punto(0.3, 0)); est.turno(otro["id"], True, *punto(9, 9))
+    s = est.crear_solicitud("Ana", *punto(0, 0), "gasolina", opcion="magna", cantidad=5, placa="SECRETA1", color="azul", )
+    est.config["demo_en_cotizacion"] = False
+    est.paso_despacho()
+    est.responder_oferta(m["id"], s["id"], True)
+    assert "SECRETA1" not in str(est.snapshot("repartidor", otro["id"]))        # otro repartidor no la ve
+    assert "SECRETA1" not in str(est.snapshot("taller", t["id"]))                # el taller tampoco, aunque vea el pedido
+    assert "SECRETA1" not in str(est.panel())                                    # ni sale en el panel general
+    assert "SECRETA1" in str(est.snapshot("repartidor", m["id"]))                # solo el repartidor asignado
+
+
+def test_api_exige_nombre_placa_color_y_vehiculo():
+    c = TestClient(app)
+    la, lo = punto(1, 1)
+    base = {"lat": la, "lon": lo, "tipo": "aire_llantas"}
+    assert c.post("/api/solicitudes", json={**base, "placa": "ABC123", "color": "rojo"}).status_code == 400            # sin nombre
+    assert c.post("/api/solicitudes", json={**base, "nombre": " ", "placa": "ABC123", "color": "rojo"}).status_code == 400
+    assert c.post("/api/solicitudes", json={**base, "nombre": "Ana"}).status_code == 400                               # sin placa
+    assert c.post("/api/solicitudes", json={**base, "nombre": "Ana", "placa": "ABC123"}).status_code == 400            # sin color
+    assert c.post("/api/solicitudes", json={**base, "nombre": "Ana", "placa": "AB", "color": "rojo"}).status_code == 400
+    assert c.post("/api/solicitudes", json={**base, "nombre": "Ana", "placa": "ABC123", "color": "morado"}).status_code == 400
+    ok = c.post("/api/solicitudes", json={**base, "nombre": "  Ana   Torres ", "placa": "abc 123", "color": "Rojo"})
+    assert ok.status_code == 200
+    rep = {"habilidades": ["aire_llantas"], "prestador": "repartidor", "vehiculo": VEH}
+    assert c.post("/api/repartidores", json={**rep, "nombre": ""}).status_code == 400                                  # sin nombre
+    assert c.post("/api/repartidores", json={"nombre": "Luis", "habilidades": ["aire_llantas"], "prestador": "repartidor"}).status_code == 400   # sin vehículo
+    sin_modelo = {"tipo": "moto", "color": "negro", "placa": "XYZ98"}
+    assert c.post("/api/repartidores", json={**rep, "nombre": "Luis", "vehiculo": sin_modelo}).status_code == 400      # moto sin marca y modelo
+    assert c.post("/api/repartidores", json={**rep, "nombre": "Luis", "vehiculo": {**sin_modelo, "placa": ""}}).status_code == 400
+    assert c.post("/api/repartidores", json={**rep, "nombre": "Luis", "vehiculo": {"tipo": "bicicleta", "color": "azul"}}).status_code == 200   # bici: sin placa ni modelo
+    cfg = c.get("/api/config").json()
+    assert "blanco" in cfg["colores"] and set(cfg["tipos_vehiculo"]) == {"moto", "auto", "bicicleta", "a_pie"}
+
+
+def test_bots_y_pedidos_de_prueba_traen_placa(est):
+    est.crear_bots(2, "repartidor")
+    assert all(m["vehiculo"] and m["vehiculo"]["placa"].startswith("SIM") for m in est.repartidores.values() if m["bot"])
+    s = est.solicitud_aleatoria()
+    assert s["vehiculo"]["placa"].startswith("PRB")
+
+
+# ------------------------------------------------------------------ modelo del vehículo, nombres y PIN
+def test_validar_modelo():
+    assert motor.validar_modelo("  Italika   FT150 ") == "Italika FT150" and motor.validar_modelo("Honda CB-125/F") == "Honda CB-125/F"
+    for malo in ["", "A", "<b>moto</b>", "x" * 31, "Moto; DROP TABLE"]:
+        with pytest.raises(ValueError):
+            motor.validar_modelo(malo)
+
+
+def test_el_modelo_es_obligatorio_en_moto_y_auto_pero_no_en_bicicleta(est):
+    for tipo in ("moto", "auto"):
+        with pytest.raises(ValueError):
+            est.registrar_repartidor("X", ["aire_llantas"], vehiculo={"tipo": tipo, "color": "negro", "placa": "ABC123"})
+    b = est.registrar_repartidor("Lalo", ["aire_llantas"], vehiculo={"tipo": "a_pie", "color": "azul", "placa": "", "modelo": ""})
+    assert b["vehiculo"]["modelo"] == ""
+
+
+def _aceptado(est, **kw):
+    """Un pedido ya aceptado por un repartidor con vehículo, con lo mínimo para probar identificación."""
+    est.talleres.clear()
+    m = est.registrar_repartidor("Beto Ramírez", ["aire_llantas"], vehiculo={"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"})
+    est.turno(m["id"], True, *punto(0.5, 0))
+    s = est.crear_solicitud("Ana Torres", *punto(0, 0), "aire_llantas", placa="ABC123D", color="blanco")
+    est.paso_despacho()
+    return m, s
+
+
+def test_el_cliente_ve_nombre_modelo_color_y_placa_de_quien_llega(est):
+    m, s = _aceptado(est)
+    assert est.snapshot("cliente", s["id"])["repartidor"] is None                                       # todavía no aceptó
+    est.responder_oferta(m["id"], s["id"], True)
+    r = est.snapshot("cliente", s["id"])["repartidor"]
+    assert r["nombre"] == "Beto Ramírez" and r["vehiculo"] == {"tipo": "moto", "color": "negro", "placa": "XYZ98", "modelo": "Italika FT150"}
+
+
+def test_el_repartidor_ve_el_nombre_del_cliente_solo_despues_de_aceptar(est):
+    m, s = _aceptado(est)
+    oferta = est.snapshot("repartidor", m["id"])["solicitud"]
+    assert oferta["estado"] == "ofertada" and oferta["nombre"] == "" and "cliente_nombre" not in oferta and "Ana" not in str(oferta)
+    est.responder_oferta(m["id"], s["id"], True)
+    ver = est.snapshot("repartidor", m["id"])["solicitud"]
+    assert ver["cliente_nombre"] == "Ana Torres" and ver["vehiculo_cliente"] == {"placa": "ABC123D", "color": "blanco"}
+
+
+def test_el_taller_no_ve_el_nombre_del_cliente(est):
+    est.talleres.clear()
+    t = est.agregar_taller("Gasolinera", *punto(0, 0))
+    est.actualizar_catalogo(t["id"], {"magna": {"litro": 24, "disponible": True}}, [])
+    s = est.crear_solicitud("Nombre Secreto", *punto(0, 0), "gasolina", opcion="magna", cantidad=5, placa="ABC123D", color="azul")
+    vista = est.snapshot("taller", t["id"])["taller"]
+    assert [p["id"] for p in vista["pedidos_activos"]] == [s["id"]] and "Secreto" not in str(vista)
+
+
+def test_llegar_exige_el_pin_que_ve_el_cliente(est):
+    m, s = _aceptado(est)
+    est.responder_oferta(m["id"], s["id"], True)
+    pin = est.snapshot("cliente", s["id"])["solicitud"]["pin"]
+    assert len(pin) == 4 and pin.isdigit() and pin == s["pin"]
+    for i, mal in enumerate((None, "", "abc", "12"), start=1):                                       # 4 fallos: todavía quedan intentos
+        with pytest.raises(ValueError, match="PIN incorrecto"):
+            est.avanzar(m["id"], "llegue", pin=mal)
+        assert s["pin_intentos"] == i and s["estado"] == "aceptada"                                  # los fallos se cuentan y no avanzan nada
+    est.avanzar(m["id"], "llegue", pin=f" {pin} ")                                                  # con un espacio de más también vale
+    assert s["estado"] == "en_sitio"
+
+
+def test_el_pin_se_bloquea_tras_cinco_intentos(est):
+    m, s = _aceptado(est)
+    est.responder_oferta(m["id"], s["id"], True)
+    falso = "0000" if s["pin"] != "0000" else "1111"
+    for i in range(5):
+        with pytest.raises(ValueError, match="PIN incorrecto"):
+            est.avanzar(m["id"], "llegue", pin=falso)
+    with pytest.raises(ValueError, match="Demasiados intentos"):
+        est.avanzar(m["id"], "llegue", pin=s["pin"])                    # ni el PIN bueno sirve ya: hay que cancelar o llamar al administrador
+    assert s["estado"] == "aceptada"
+    est.cancelar_solicitud(s["id"])                                     # el cliente siempre puede cancelar
+    assert s["estado"] == "cancelada"
+
+
+def test_el_pin_solo_lo_ve_el_cliente_y_solo_hasta_que_llega_el_repartidor(est):
+    m, s = _aceptado(est)
+    assert "pin" not in est.snapshot("cliente", s["id"])["solicitud"]                                 # en la oferta aún no
+    est.responder_oferta(m["id"], s["id"], True)
+    assert est.snapshot("cliente", s["id"])["solicitud"]["pin"] == s["pin"]
+    for vista in (est.snapshot("repartidor", m["id"]), est.panel()):
+        assert "'pin'" not in str(vista), "el PIN no debe salir en esta vista"             # ni el repartidor ni el panel lo ven
+    est.avanzar(m["id"], "llegue", pin=s["pin"])
+    assert "pin" not in est.snapshot("cliente", s["id"])["solicitud"]                                 # al llegar ya no se muestra
+
+
+def test_sin_requiere_pin_no_se_pide(est):
+    est.config["requiere_pin"] = False
+    m, s = _aceptado(est)
+    est.responder_oferta(m["id"], s["id"], True)
+    est.avanzar(m["id"], "llegue")
+    assert s["estado"] == "en_sitio"
+
+
+def test_los_repartidores_simulados_si_pueden_llegar(est):
+    est.crear_bots(1, "repartidor")
+    bot = next(x for x in est.repartidores.values() if x["bot"])
+    assert bot["vehiculo"]["modelo"]
+    est.config.update(rechazo_bot=0.0, prob_escalar=0.0)
+    s = est.crear_solicitud("Ana", *punto(0, 0), "aire_llantas", placa="ABC123", color="rojo")
+    bot["lat"], bot["lon"] = punto(0.2, 0)
+    est.paso_despacho()
+    est.responder_oferta(bot["id"], s["id"], True)
+    est.avanzar(bot["id"], "llegue", pin=s["pin"])
+    assert s["estado"] == "en_sitio"
+
+
+def test_api_pin_nombres_y_modelo_de_punta_a_punta():
+    from app.main import estado
+    estado.reiniciar()                    # el estado de la app es global: así no heredamos pedidos ni repartidores de otras pruebas
+    c = TestClient(app)
+    veh = {"tipo": "moto", "color": "negro", "placa": "pin 123", "modelo": "Italika FT150"}
+    mid = c.post("/api/repartidores", json={"nombre": "Beto Ramírez", "habilidades": ["aire_llantas"], "vehiculo": veh}).json()["id"]
+    c.post(f"/api/repartidores/{mid}/turno", json={"activo": True, "lat": punto(0.4, 0)[0], "lon": punto(0.4, 0)[1]})
+    la, lo = punto(0, 0)
+    sid = c.post("/api/solicitudes", json={"lat": la, "lon": lo, "tipo": "aire_llantas", "nombre": "Ana Torres", "placa": "ABC123D", "color": "blanco"}).json()["id"]
+    estado.paso_despacho()
+    assert c.post(f"/api/repartidores/{mid}/respuesta", json={"solicitud_id": sid, "acepta": True}).status_code == 200
+    cli = c.get(f"/api/solicitudes/{sid}").json()
+    pin = cli["solicitud"]["pin"]
+    assert cli["repartidor"]["nombre"] == "Beto Ramírez" and cli["repartidor"]["vehiculo"]["modelo"] == "Italika FT150" and cli["repartidor"]["vehiculo"]["placa"] == "PIN123"
+    rep = c.get(f"/api/repartidores/{mid}").json()["solicitud"]
+    assert rep["cliente_nombre"] == "Ana Torres" and rep["vehiculo_cliente"]["placa"] == "ABC123D" and "pin" not in rep
+    malo = "0000" if pin != "0000" else "1111"
+    r = c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue", "pin": malo})
+    assert r.status_code == 400 and "PIN incorrecto" in r.json()["detail"] and "Te quedan 4 intentos" in r.json()["detail"]
+    assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue"}).status_code == 400                    # sin PIN
+    assert c.post(f"/api/repartidores/{mid}/estado", json={"accion": "llegue", "pin": pin}).status_code == 200
+    assert c.get(f"/api/solicitudes/{sid}").json()["solicitud"]["estado"] == "en_sitio"

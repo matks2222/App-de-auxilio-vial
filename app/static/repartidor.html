@@ -1,14 +1,21 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Repartidor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<link rel="stylesheet" href="/static/estilo.css?v=8"></head><body>
+<link rel="stylesheet" href="/static/estilo.css?v=11"></head><body>
 <header><h1>Repartidor de auxilio vial</h1><a href="/">Inicio</a></header>
 <div id="mapa"></div>
 <div id="leyenda" class="sub" style="padding:4px 12px"></div>
 
 <div id="registro" class="tarjeta" style="display:none">
   <h2>Regístrate</h2>
-  <label>Tu nombre</label><input id="nombre" maxlength="60" placeholder="Nombre">
+  <label for="nombre">Tu nombre completo (lo verá el cliente)</label><input id="nombre" maxlength="60" placeholder="Nombre y apellido" autocomplete="name">
+  <div id="bloqueVehiculo">
+    <label for="vTipo">Tu vehículo</label><select id="vTipo"></select>
+    <div id="bloqueModelo"><label for="vModelo">Marca y modelo</label><input id="vModelo" maxlength="30" autocomplete="off" placeholder="Ej. Italika FT150"></div>
+    <div id="bloquePlaca"><label for="vPlaca">Placa</label><input id="vPlaca" maxlength="12" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Ej. ABC123D" style="text-transform:uppercase;font-weight:bold;letter-spacing:2px"></div>
+    <label for="vColor">Color</label><select id="vColor"></select>
+    <div class="sub" style="margin-top:4px">El cliente verá tu nombre, tu vehículo y tu placa para reconocerte. Escribe tus datos reales.</div>
+  </div>
   <div id="bloqueCodigo" style="display:none"><label>Código de acceso (te lo da el administrador)</label><input id="codigo" maxlength="100" autocomplete="off"></div>
   <div id="bloquePrestador"><label>¿Cómo vas a participar?</label><select id="prestador"></select></div>
   <div id="notaPrestador" class="sub" style="margin-top:4px"></div>
@@ -20,7 +27,7 @@
 
 <div id="principal" class="tarjeta" style="display:none">
   <div class="fila" style="align-items:center">
-    <div><div id="miNombre" class="estado"></div><div id="miEstado" class="sub"></div></div>
+    <div><div id="miNombre" class="estado"></div><div id="miEstado" class="sub"></div><div id="miVehiculo" class="sub"></div></div>
     <button id="btnTurno" style="max-width:150px"></button>
   </div>
   <div id="espera" class="aviso" style="display:none"></div>
@@ -33,7 +40,7 @@
 <div class="pie">La app no procesa pagos: cobra exactamente lo que vio el cliente. Si la situación es peligrosa, no te detengas y llama al 911.</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<script src="/static/comun.js?v=8"></script>
+<script src="/static/comun.js?v=11"></script>
 <script>
 const mapa = crearMapa("mapa");
 const $ = (id) => document.getElementById(id);
@@ -53,6 +60,9 @@ api("/api/config").then((c) => {
   config = c;
   $("prestador").innerHTML = Object.entries(c.prestadores).map(([k, v]) => `<option value="${k}">${esc(v.nombre)}</option>`).join("");
   $("prestador").onchange = pintarHabilidades;
+  $("vTipo").innerHTML = Object.entries(c.tipos_vehiculo).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  $("vColor").innerHTML = c.colores.map((k) => `<option value="${k}">${esc(k.charAt(0).toUpperCase() + k.slice(1))}</option>`).join("");
+  $("vTipo").onchange = () => { const sin = ["bicicleta", "a_pie"].includes($("vTipo").value); $("bloquePlaca").style.display = sin ? "none" : "block"; $("bloqueModelo").style.display = sin ? "none" : "block"; };
   $("bloqueCodigo").style.display = c.requiere_codigo ? "block" : "none";
   $("bloquePrestador").style.display = Object.keys(c.prestadores).length > 1 ? "block" : "none";     // con un solo rol no hay nada que elegir
   pintarHabilidades();
@@ -60,8 +70,10 @@ api("/api/config").then((c) => {
 
 $("btnRegistro").onclick = async () => {
   const hab = [...document.querySelectorAll("#habilidades input:checked")].map((i) => i.value);
+  if ($("nombre").value.trim().replace(/\s+/g, " ").length < 2) { $("errorReg").textContent = "Escribe tu nombre completo: el cliente lo verá para saber quién llega."; $("errorReg").style.display = "block"; return; }
   try {
-    const r = await api("/api/repartidores", "POST", { codigo: $("codigo").value, nombre: $("nombre").value, habilidades: hab, prestador: $("prestador").value });
+    const r = await api("/api/repartidores", "POST", { codigo: $("codigo").value, nombre: $("nombre").value, habilidades: hab, prestador: $("prestador").value,
+      vehiculo: { tipo: $("vTipo").value, color: $("vColor").value, placa: $("vPlaca").value, modelo: $("vModelo").value } });
     mid = r.id; localStorage.setItem("mid", mid); arrancar();
   } catch (e) { $("errorReg").textContent = e.message; $("errorReg").style.display = "block"; }
 };
@@ -112,6 +124,8 @@ function pintar(snap) {
   $("miNombre").textContent = `${ICONO_PRESTADOR[m.prestador]} ${m.nombre}`;
   const nombres = { fuera: "Fuera de turno", libre: "En turno: esperando solicitudes", ofertado: "Tienes una oferta", ocupado: "Atendiendo un servicio" };
   $("miEstado").textContent = `${NOMBRE_PRESTADOR[m.prestador]} · ${nombres[m.estado]} · servicios: ${m.servicios}`;
+  const v = m.vehiculo;
+  $("miVehiculo").textContent = v ? `${{ moto: "Moto", auto: "Auto", bicicleta: "Bicicleta", a_pie: "A pie" }[v.tipo] || "Vehículo"}${v.modelo ? " " + v.modelo : ""} · ${v.color}${v.placa ? " · placa " + v.placa : ""}` : "";
   $("btnTurno").textContent = m.estado === "fuera" ? "Entrar en turno" : "Salir de turno";
   $("btnTurno").className = m.estado === "fuera" ? "ok" : "sec";
   $("btnTurno").disabled = m.estado === "ocupado";
@@ -143,7 +157,10 @@ function pintar(snap) {
   if (m.estado === "ocupado" && s) {
     const enSitio = s.estado === "en_sitio";
     const taller = s.tipo === "grua" && s.taller ? `<div class="aviso">🛠️ Lleva el auto a: <b>${esc(s.taller.nombre)}</b> (a ${s.taller.distancia_km.toFixed(1)} km) · <a href="https://www.google.com/maps/dir/?api=1&destination=${s.taller.lat},${s.taller.lon}" target="_blank" rel="noopener">ruta</a></div>` : "";
-    let botones = `<button class="ok" id="btnAvance" style="width:100%">Ya llegué con el cliente</button>`;
+    let botones = `<label for="pin">PIN de seguridad que te da el cliente (4 dígitos)</label>
+      <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="····" style="font-size:28px;letter-spacing:10px;text-align:center;font-weight:bold">
+      <button class="ok" id="btnAvance" style="width:100%;margin-top:8px">Ya llegué con el cliente</button>
+      <div class="sub" style="margin-top:4px">Pídele el PIN cuando estés con él: sin el PIN no se puede empezar el servicio.</div>`;
     if (enSitio) {
       const op = m.opciones_escalar || [];
       botones = `${op.length ? `<label>Diagnóstico (obligatorio si escalas)</label><textarea id="nota" rows="2" maxlength="300" placeholder="Qué encontraste"></textarea>` : ""}
@@ -151,7 +168,10 @@ function pintar(snap) {
         ${op.includes("escalar_grua") ? `<div class="fila" style="margin-top:8px"><button class="mal" id="btnEscGrua">Falla mayor: pedir grúa</button></div>` : ""}`;
     }
     $("trabajo").style.display = "block";
+    const vc = s.vehiculo_cliente;
+    const autoCliente = vc ? `<div class="aviso" style="font-size:16px">👤 Cliente: <b>${esc(s.cliente_nombre || "")}</b><br>🚗 Busca un auto <b>${esc(vc.color)}</b> con placa <b style="font-size:20px;letter-spacing:2px">${esc(vc.placa)}</b><br><span class="sub">Confirma que la placa y el nombre coinciden antes de entregar nada.</span></div>` : "";
     $("trabajo").innerHTML = `<h2>${enSitio ? "Atendiendo" : "Ve hacia el cliente"}</h2>
+      ${autoCliente}
       <div class="estado">${esc(s.tipo_texto)}</div>
       <div class="sub">${s.lugar ? "📍 Punto: " + esc(s.lugar) : ""}${s.notas ? "<br>Notas: " + esc(s.notas) : ""}</div>
       ${taller}${enSitio ? "" : bloquePedido(s)}${enSitio && s.cotizacion ? `<div class="aviso">🧾 Cobra al cliente: <b>${fmtMXN(s.cotizacion.total)}</b> (${esc(s.cotizacion.concepto)}, ya incluye el servicio a domicilio). Es el precio que vio el cliente: no cobres de más. La app no procesa pagos.</div>` : ""}
@@ -159,7 +179,9 @@ function pintar(snap) {
     const ir = async (accion) => {
       const nota = $("nota") ? $("nota").value.trim() : "";
       if (accion.startsWith("escalar") && !nota) return mostrarError("Escribe el diagnóstico antes de escalar.");
-      try { await api(`/api/repartidores/${mid}/estado`, "POST", { accion, nota }); } catch (e) { mostrarError(e.message); }
+      const pin = $("pin") ? $("pin").value.trim() : "";
+      if (accion === "llegue" && !/^[0-9]{4}$/.test(pin)) return mostrarError("Pídele al cliente su PIN de 4 dígitos para marcar que llegaste.");
+      try { await api(`/api/repartidores/${mid}/estado`, "POST", { accion, nota, pin }); } catch (e) { mostrarError(e.message); }
     };
     if ($("btnAvance")) $("btnAvance").onclick = () => ir("llegue");
     if ($("btnResuelto")) $("btnResuelto").onclick = () => ir("termine");

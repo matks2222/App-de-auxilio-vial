@@ -4,6 +4,7 @@ Es la misma lógica del simulador (despacho_sim.py), adaptada a coordenadas geog
 El ETA usa distancia en línea recta por un factor de rodeo; para producción debe
 reemplazarse por un servicio de rutas (OSRM, GraphHopper, etc.).
 """
+import re
 import math
 
 import numpy as np
@@ -46,6 +47,35 @@ PRESTADORES = {
                        permitidas=SIMPLES, por_defecto=[k for k in SIMPLES if k != "bateria_nueva"]),
     "grua": dict(nombre="Operador de grúa", nivel=2, permitidas=["grua"], por_defecto=["grua"]),
 }
+
+# ------------------------------------------------------------------ identificación: placas y colores
+COLORES = ["blanco", "negro", "gris", "plata", "rojo", "azul", "verde", "amarillo", "naranja", "café", "vino", "otro"]
+TIPOS_VEHICULO = {"moto": "Moto", "auto": "Auto", "bicicleta": "Bicicleta", "a_pie": "A pie"}
+SIN_PLACA = ("bicicleta", "a_pie")                       # estos repartidores no tienen placa que registrar
+
+
+def normalizar_placa(texto):
+    """Mayúsculas, sin espacios ni guiones: 'abc-123 d' -> 'ABC123D'. Acepta de 5 a 8 letras o números."""
+    p = re.sub(r"[\s\-.]", "", texto or "").upper()
+    if not re.fullmatch(r"[A-Z0-9]{5,8}", p):
+        raise ValueError("Revisa la placa: debe tener entre 5 y 8 letras o números")
+    return p
+
+
+def validar_modelo(texto):
+    """Marca y modelo del vehículo (ej. 'Italika FT150'): de 2 a 30 caracteres, solo letras, números, espacios y . - /"""
+    m = re.sub(r"\s+", " ", texto or "").strip()
+    if not re.fullmatch(r"[\w .\-/+]{2,30}", m):
+        raise ValueError("Escribe la marca y el modelo de tu vehículo (por ejemplo, Italika FT150)")
+    return m
+
+
+def validar_color(color):
+    c = (color or "").strip().lower()
+    if c not in COLORES:
+        raise ValueError("Elige el color de la lista")
+    return c
+
 
 # ------------------------------------------------------------------ precios (MXN)
 # Valores de referencia que se usan cuando ningún taller cercano tiene el producto. Cada taller fija los suyos.

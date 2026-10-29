@@ -24,6 +24,19 @@ invita a llamar o reintentar. El número de teléfono y el WhatsApp se conservan
 **Apagados, no borrados:** batería nueva, cambio de llanta, diagnóstico, mecánico y grúa siguen en el código pero no se ofrecen (`servicios_activos` en `estado.py`).
 Para reactivarlos hay que prender esos servicios y volver a mostrarlos en las pantallas.
 
+## Identificación y seguridad entre cliente y repartidor
+
+Para que cada parte sepa con quién trata:
+
+- **El cliente** escribe su **nombre**, la **placa** de su auto (5 a 8 letras o números; se aceptan guiones y espacios) y toca el **color** antes de pedir. Se guarda en su teléfono, así que solo lo escribe la primera vez.
+- **El repartidor** registra su **nombre completo**, su **vehículo** (moto, auto, bicicleta o a pie), la **marca y modelo** (por ejemplo, Italika FT150), el **color** y la **placa**. La placa y el modelo no aplican a bicicleta ni a pie.
+- **Lo que ve el cliente cuando el repartidor acepta:** su nombre, su vehículo con marca y modelo, el color y la placa, con el aviso de confirmar que coinciden antes de entregarle nada.
+- **Lo que ve el repartidor cuando acepta:** el nombre del cliente y el color y la placa de su auto. En la **oferta** todavía no ve ninguno de esos datos.
+- **PIN de seguridad:** al aceptarse el pedido, el cliente ve un PIN de 4 dígitos. El repartidor tiene que **pedírselo en persona** y teclearlo para marcar «Ya llegué»: sin el PIN correcto no se puede empezar el servicio. Así nadie marca llegada sin estar con el cliente y un impostor no puede empezar un pedido ajeno. Tras 5 intentos fallidos se bloquea esa llegada (el cliente puede cancelar). El PIN se muestra solo al cliente, solo mientras el repartidor viene en camino; no lo ven el repartidor, el taller ni el panel. Se puede apagar con `requiere_pin=False` en la configuración, solo para pruebas.
+- Los datos del cliente solo los ve el repartidor asignado: no salen en el panel ni los ve el taller ni otro repartidor. Al terminar el servicio, ninguna de las dos partes sigue viendo los datos de la otra.
+
+**Límite importante:** lo que escribe cada quien **no está verificado**: un nombre o una placa se pueden teclear falsos. El PIN protege el encuentro en persona, pero no comprueba quién es nadie. Para verificar a los repartidores antes de darles acceso falta, por ejemplo, un **código personal por repartidor**, entregado después de revisar su INE en persona. La app no guarda INE ni fotos, y no recomendamos pedírselas al cliente: son datos personales sensibles y exigen un aviso de privacidad formal.
+
 ## Precios
 
 - **Precio final y visible antes de pedir**, igual para todos y sin cargos extra. El servidor lo calcula al crear el pedido: el navegador no lo puede alterar.
@@ -177,7 +190,7 @@ prototipo a internet y, como no tiene autenticación, úsalo solo un rato y con 
 - `render.yaml`: configuración para publicar en Render.
 - `app/main.py`: servidor FastAPI, WebSocket, enlaces cortos `/q/código`, imágenes QR y rutas de las páginas.
 - `app/static/`: páginas del cliente, el repartidor, el taller, los QR (`qr.html`), el letrero imprimible (`letrero.html`), las cuentas (`negocio.html`) y el panel (Leaflet con OpenStreetMap).
-- `tests/`: 74 pruebas automáticas (`python -m pytest tests -q`).
+- `tests/`: 92 pruebas automáticas (`python -m pytest tests -q`).
 
 Los eventos de la tabla `eventos` (en `despacho.db`) sirven para calibrar después el simulador con datos reales.
 

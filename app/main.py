@@ -137,6 +137,8 @@ class NuevaSolicitud(BaseModel):
     opcion: str | None = Field(None, max_length=20)       # combustible (magna, premium, diesel) o tipo de batería
     cantidad: int | None = Field(None, ge=1, le=100)      # litros, solo para gasolina
     lugar: str = Field("", max_length=60)                 # letrero (QR) que escaneó la persona, si vino de uno
+    placa: str = Field("", max_length=15)                 # placa del auto del cliente (obligatoria): así el repartidor lo reconoce
+    color: str = Field("", max_length=20)                 # color del auto del cliente (obligatorio)
 
 
 class Calificacion(BaseModel):
@@ -144,7 +146,15 @@ class Calificacion(BaseModel):
     comentario: str = Field("", max_length=300)
 
 
+class VehiculoIn(BaseModel):
+    modelo: str = Field("", max_length=40)                 # marca y modelo, ej. "Italika FT150"
+    tipo: str = Field("", max_length=20)
+    color: str = Field("", max_length=20)
+    placa: str = Field("", max_length=15)
+
+
 class NuevoRepartidor(BaseModel):
+    vehiculo: VehiculoIn | None = None
     codigo: str = Field("", max_length=100)
     nombre: str = Field("", max_length=60)
     habilidades: list[str]
@@ -170,6 +180,7 @@ class Respuesta(BaseModel):
 class Accion(BaseModel):
     accion: str
     nota: str = Field("", max_length=300)
+    pin: str = Field("", max_length=8)                      # PIN que el cliente le da al repartidor al llegar
 
 
 class Config(BaseModel):
@@ -270,7 +281,8 @@ def api_config():
                 prestadores=prestadores, precios=estado.config["precios"],
                 litros=dict(min=motor.LITROS_MIN, max=motor.LITROS_MAX, defecto=motor.LITROS_DEFAULT),
                 contacto={k: v for k, v in estado.ajustes().items() if k != "url_publica"},
-                requiere_codigo=bool(seguridad.codigo_colaboradores()))
+                requiere_codigo=bool(seguridad.codigo_colaboradores()),
+                colores=motor.COLORES, tipos_vehiculo=motor.TIPOS_VEHICULO)
 
 
 @app.get("/api/talleres")
@@ -332,10 +344,16 @@ def api_cercanos(lat: float, lon: float, tipo: str | None = None):
 async def crear_solicitud(d: NuevaSolicitud, request: Request):
     if d.tipo not in estado.config["servicios_activos"]:
         raise HTTPException(400, "Ese servicio no está disponible")
+    if len(" ".join(d.nombre.split())) < 2:
+        raise HTTPException(400, "Escribe tu nombre")
+    if not d.placa.strip():
+        raise HTTPException(400, "Escribe la placa de tu auto")
+    if not d.color.strip():
+        raise HTTPException(400, "Elige el color de tu auto")
     if seguridad.modo_publico() and not seguridad.limitador.permitir("pedido:" + seguridad.ip_cliente(request), seguridad.limite_pedidos_hora(), 3600):
         raise HTTPException(429, "Hiciste varios pedidos seguidos desde esta conexión. Si es una emergencia, llámanos.")
-    s = corre(estado.crear_solicitud, d.nombre, d.lat, d.lon, d.tipo, d.via, d.notas, d.riesgo,
-              opcion=d.opcion, cantidad=d.cantidad, lugar=d.lugar)
+    s = corre(estado.crear_solicitud, " ".join(d.nombre.split()), d.lat, d.lon, d.tipo, d.via, d.notas, d.riesgo,
+              opcion=d.opcion, cantidad=d.cantidad, lugar=d.lugar, placa=d.placa, color=d.color)
     await notificar()
     return dict(id=s["id"], prioridad=s["prioridad"], cotizacion=s["cotizacion"])
 
@@ -364,7 +382,11 @@ async def calificar(sid: str, d: Calificacion):
 async def crear_repartidor(d: NuevoRepartidor, request: Request):
     exigir_codigo(d.codigo, request)
     habilidades = [h for h in d.habilidades if h in estado.config["servicios_activos"]]
-    m = corre(estado.registrar_repartidor, d.nombre, habilidades, prestador=d.prestador)
+    if len(" ".join(d.nombre.split())) < 2:
+        raise HTTPException(400, "Escribe tu nombre completo")
+    if d.vehiculo is None:
+        raise HTTPException(400, "Registra tu vehículo: tipo, marca y modelo, color y placa")
+    m = corre(estado.registrar_repartidor, " ".join(d.nombre.split()), habilidades, prestador=d.prestador, vehiculo=d.vehiculo.model_dump())
     return dict(id=m["id"])
 
 
@@ -396,7 +418,7 @@ async def respuesta(mid: str, d: Respuesta):
 
 @app.post("/api/repartidores/{mid}/estado")
 async def avanzar(mid: str, d: Accion):
-    corre(estado.avanzar, mid, d.accion, d.nota)
+    corre(estado.avanzar, mid, d.accion, d.nota, d.pin)
     await notificar()
     return {"ok": True}
 

@@ -1,7 +1,7 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel del taller</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<link rel="stylesheet" href="/static/estilo.css?v=8">
+<link rel="stylesheet" href="/static/estilo.css?v=11">
 <style>
   .fila-bat { display:grid; grid-template-columns: 1fr 1fr; gap:6px; padding:8px 0; border-bottom:1px solid #eee; }
   .fila-bat .ancho { grid-column: 1 / -1; }
@@ -87,7 +87,7 @@
 <div class="pie">La app no procesa pagos: el repartidor cobra el precio que vio el cliente. Los precios de referencia no son oficiales.</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<script src="/static/comun.js?v=8"></script>
+<script src="/static/comun.js?v=11"></script>
 <script>
 const mapa = crearMapa("mapa");
 const $ = (id) => document.getElementById(id);
@@ -207,7 +207,7 @@ function pintar(snap) {
   if (!formLleno && config) llenarFormularios();
   const act = t.pedidos_activos || [];
   $("pedidos").innerHTML = act.length ? act.map((s) => `<div class="pedido"><b>${esc(s.cotizacion.concepto)}</b> · ${fmtMXN(s.cotizacion.total)}<br>
-      <span class="sub">${esc(ESTADOS[s.estado] || s.estado)} · cliente: ${esc(s.nombre)} · pedido ${esc(s.id)}</span></div>`).join("")
+      <span class="sub">${esc(ESTADOS[s.estado] || s.estado)} · pedido ${esc(s.id)}</span></div>`).join("")
     : '<div class="sub" style="margin-top:8px">Sin pedidos por ahora.</div>';
   $("totalVendido").textContent = `Total vendido: ${fmtMXN(t.total_vendido)}`;
   $("ventas").innerHTML = t.ventas.length ? t.ventas.slice(0, 20).map((v) => `<div class="pedido">${esc(v.concepto)} · <b>${fmtMXN(v.total)}</b>
