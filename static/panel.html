@@ -1,0 +1,121 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de demostración</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="/static/estilo.css?v=13"></head><body>
+<header><h1>Panel de demostración</h1><a href="/">Inicio</a></header>
+<div class="panelgrid">
+  <div id="mapa"></div>
+  <div class="lateral">
+    <div class="tarjeta" style="margin:4px 0 8px">
+      <h2>Controles</h2>
+      <div class="sub" id="leyenda"></div>
+      <label>Política de asignación</label><select id="politica"></select>
+      <div class="fila"><div><label>Lote cada (s)</label><input id="ventana" type="number" min="1" max="120"></div><div><label>Oferta expira (s)</label><input id="oferta" type="number" min="5" max="300"></div><div><label>Radio (km)</label><input id="radio" type="number" min="0.5" max="50" step="0.5"></div></div>
+      <div class="fila"><div><label>Reintento tras un rechazo (s)</label><input id="reoferta" type="number" min="0" max="3600"></div><div><label>Espera máxima del pedido (min)</label><input id="esperaMax" type="number" min="1" max="1440"></div></div>
+      <button id="btnConfig" class="sec" style="width:100%;margin-top:8px">Aplicar</button>
+      <div class="fila" style="margin-top:8px"><button id="btnRep" class="sec">+5 repartidores</button></div>
+      <div class="fila" style="margin-top:8px"><button id="btnQuitar" class="sec">Quitar simulados</button><button id="btnTaller" class="sec">+ taller de prueba</button></div>
+      <div class="fila" style="margin-top:8px"><button id="btnSol">Solicitud de prueba</button><button id="btnReset" class="mal">Reiniciar todo</button></div>
+    </div>
+    <div class="tarjeta" style="margin:4px 0 8px">
+      <h2>Registro de repartidores</h2>
+      <div class="sub" id="regEstado"></div>
+      <div class="fila" style="margin-top:8px"><button id="btnPausa" class="sec">Cerrar registro</button><button id="btnDesbloq" class="sec">Quitar bloqueo</button></div>
+    </div>
+    <div class="tarjeta" style="margin:4px 0 8px">
+      <h2>Precios de referencia (MXN)</h2>
+      <div class="sub">Se usan cuando ningún taller cercano tiene el producto. Cada taller fija los suyos en <a href="/taller">/taller</a>.
+        Gasolina: promedio aproximado en CDMX (jul-ago 2026). Los cargos por servicio son supuestos tuyos: ajústalos.</div>
+      <label>Gasolina y diésel (pesos por litro)</label>
+      <div class="fila"><div><label>Magna</label><input id="pMagna" type="number" min="5" max="100" step="0.1"></div><div><label>Premium</label><input id="pPremium" type="number" min="5" max="100" step="0.1"></div><div><label>Diésel</label><input id="pDiesel" type="number" min="5" max="100" step="0.1"></div></div>
+      <label>Cargo por servicio a domicilio (pesos): lo que se cobra además del producto</label>
+      <div class="fila"><div><label>Gasolina</label><input id="sGas" type="number" min="0" max="2000" step="5"></div><div><label>Aire</label><input id="sAire" type="number" min="0" max="2000" step="5"></div><div><label>Corriente</label><input id="sCorr" type="number" min="0" max="2000" step="5"></div></div>
+      <div class="sub" style="margin-top:6px">¿Cuánto conviene cobrar? Haz las cuentas en <a href="/negocio">/negocio</a>.</div>
+      <button id="btnPrecios" class="sec" style="width:100%;margin-top:8px">Guardar precios</button>
+    </div>
+    <div class="tarjeta" style="margin:4px 0 8px"><h2>Talleres</h2><div class="sub">Los talleres reales se registran solos en <a href="/taller">/taller</a>.</div><div style="max-height:180px;overflow:auto"><table id="tTal"></table></div></div>
+    <div class="tarjeta" style="margin:4px 0 8px"><h2>Métricas</h2><div id="metricas" class="sub"></div></div>
+    <div class="tarjeta" style="margin:4px 0 8px"><h2>Solicitudes</h2><div style="max-height:200px;overflow:auto"><table id="tSol"></table></div></div>
+    <div class="tarjeta" style="margin:4px 0 8px"><h2>Repartidores y grúas</h2><div style="max-height:200px;overflow:auto"><table id="tMec"></table></div></div>
+    <div class="tarjeta" style="margin:4px 0 8px"><h2>Eventos recientes</h2><div id="log" class="sub" style="max-height:200px;overflow:auto"></div></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="/static/comun.js?v=13"></script>
+<script>
+const mapa = crearMapa("mapa", CENTRO, 14);
+const $ = (id) => document.getElementById(id);
+$("leyenda").textContent = LEYENDA;
+const marcMec = {}, marcSol = {}, marcTal = {};
+const colMec = { libre: "#1d9a6c", ofertado: "#d98e04", ocupado: "#2f6fdb", fuera: "#999" };
+const colSol = { pendiente: "#d9534f", ofertada: "#d98e04", aceptada: "#2f6fdb", en_sitio: "#2f6fdb", terminada: "#1d9a6c", cancelada: "#999", escalada: "#8e44ad" };
+let formLleno = false, preciosLleno = false;
+
+api("/api/config").then((c) => { $("politica").innerHTML = c.politicas.map((p) => `<option>${p}</option>`).join(""); });
+$("btnConfig").onclick = () => api("/api/panel/config", "POST", { politica: $("politica").value, ventana_s: +$("ventana").value, oferta_s: +$("oferta").value,
+  radio_km: +$("radio").value, reoferta_s: +$("reoferta").value, espera_max_s: +$("esperaMax").value * 60 }).catch((e) => alert(e.message));
+$("btnPrecios").onclick = () => api("/api/panel/precios", "POST", {
+  combustibles: { magna: +$("pMagna").value, premium: +$("pPremium").value, diesel: +$("pDiesel").value },
+  servicios: { gasolina: +$("sGas").value, aire_llantas: +$("sAire").value, paso_de_corriente: +$("sCorr").value } }).then(() => alert("Precios guardados")).catch((e) => alert(e.message));
+$("btnRep").onclick = () => api("/api/panel/bots", "POST", { n: 5, prestador: "repartidor" });
+$("btnQuitar").onclick = () => api("/api/panel/bots", "DELETE");
+$("btnTaller").onclick = () => api("/api/panel/taller_demo", "POST");
+$("btnSol").onclick = () => api("/api/panel/solicitud_aleatoria", "POST");
+let regPausado = false;
+function pintarRegistro(r) {
+  regPausado = r.pausado;
+  const m = Math.floor(r.segundos_bloqueo / 60) + 1;
+  $("regEstado").innerHTML = (r.pausado ? "🔒 Cerrado por ti. " : r.bloqueado ? `⛔ Bloqueado solo (${r.motivo}). Se reabre en ${m} min. ` : r.reto_activo ? "⚠️ Hay muchos registros: se pide un reto. " : "✅ Abierto. ")
+    + `<br>Registros en 10 min: ${r.registros_10min} · códigos fallidos: ${r.codigos_fallidos_10min} · repartidores: ${r.repartidores}/${r.tope}`;
+  $("btnPausa").textContent = r.pausado ? "Abrir registro" : "Cerrar registro";
+}
+const cargarRegistro = () => api("/api/panel/registro").then(pintarRegistro).catch(() => {});
+$("btnPausa").onclick = () => api("/api/panel/registro", "POST", { pausado: !regPausado }).then(pintarRegistro);
+$("btnDesbloq").onclick = () => api("/api/panel/registro", "POST", { desbloquear: true }).then(pintarRegistro);
+cargarRegistro(); setInterval(cargarRegistro, 10000);
+$("btnReset").onclick = () => { if (confirm("¿Borrar solicitudes y prestadores?")) api("/api/panel/reiniciar", "POST"); };
+
+function sincronizar(marcas, items, fabrica) {
+  const vistos = new Set();
+  items.forEach((it) => { vistos.add(it.id); fabrica(marcas, it); });
+  Object.keys(marcas).forEach((k) => { if (!vistos.has(k)) { mapa.removeLayer(marcas[k]); delete marcas[k]; } });
+}
+
+suscribir("panel", "", (p) => {
+  if (!formLleno) {
+    $("politica").value = p.config.politica; $("ventana").value = p.config.ventana_s; $("oferta").value = p.config.oferta_s;
+    $("radio").value = p.config.radio_km; $("reoferta").value = p.config.reoferta_s; $("esperaMax").value = Math.round(p.config.espera_max_s / 60); formLleno = true;
+  }
+  if (!preciosLleno) {            // se llenan una sola vez para no borrar lo que estás escribiendo
+    const pr = p.config.precios;
+    $("pMagna").value = pr.combustibles.magna.litro; $("pPremium").value = pr.combustibles.premium.litro; $("pDiesel").value = pr.combustibles.diesel.litro;
+    $("sGas").value = pr.servicios.gasolina; $("sAire").value = pr.servicios.aire_llantas; $("sCorr").value = pr.servicios.paso_de_corriente; preciosLleno = true;
+  }
+  sincronizar(marcTal, p.talleres, (marcas, t) => { if (!marcas[t.id]) marcas[t.id] = L.marker([t.lat, t.lon], { icon: pin("🛠️", "#8a5a2b") }).addTo(mapa).bindTooltip(t.nombre); });
+  sincronizar(marcMec, p.repartidores.filter((m) => m.lat != null), (marcas, m) => {
+    const ico = pin(ICONO_PRESTADOR[m.prestador] || "🔧", colMec[m.estado] || "#999");
+    if (marcas[m.id]) { marcas[m.id].setLatLng([m.lat, m.lon]); marcas[m.id].setIcon(ico); }
+    else marcas[m.id] = L.marker([m.lat, m.lon], { icon: ico }).addTo(mapa).bindTooltip(m.nombre);
+    marcas[m.id].setTooltipContent(`${m.nombre} (${m.estado})`);
+  });
+  const activas = p.solicitudes.filter((s) => !["terminada", "cancelada", "escalada"].includes(s.estado));
+  sincronizar(marcSol, activas, (marcas, s) => {
+    const ico = pin("🚗", colSol[s.estado] || "#999");
+    if (marcas[s.id]) marcas[s.id].setIcon(ico); else marcas[s.id] = L.marker([s.lat, s.lon], { icon: ico }).addTo(mapa);
+    marcas[s.id].bindTooltip(`${s.tipo_texto} · ${s.estado} · prioridad ${s.prioridad_texto}`);
+  });
+  const mt = p.metricas;
+  $("metricas").innerHTML = `Solicitudes: <b>${mt.solicitudes}</b> · con prestador en sitio: <b>${mt.atendidas}</b><br>` +
+    `Espera media hasta la llegada: <b>${mt.espera_media_min == null ? "—" : mt.espera_media_min.toFixed(1) + " min"}</b><br>` +
+    `Aceptación de ofertas: <b>${mt.aceptacion == null ? "—" : Math.round(mt.aceptacion * 100) + " %"}</b><br>` +
+    `Por estado: ${Object.entries(mt.por_estado).map(([k, v]) => `${k} ${v}`).join(", ") || "—"}<br>` +
+    `Prestadores: ${Object.entries(mt.prestadores).map(([k, v]) => `${k} ${v}`).join(", ") || "—"}`;
+  $("tSol").innerHTML = "<tr><th>Id</th><th>Falla</th><th>Nv</th><th>Estado</th><th>Prio</th><th>ETA</th></tr>" +
+    p.solicitudes.slice(0, 20).map((s) => `<tr><td>${esc(s.id)}</td><td>${esc(s.tipo_texto)}</td><td>${s.nivel}</td><td>${esc(s.estado)}</td><td>${esc(s.prioridad_texto)}</td><td>${s.eta_s == null ? "—" : fmtEta(s.eta_s)}</td></tr>`).join("");
+  $("tMec").innerHTML = "<tr><th>Nombre</th><th>Tipo</th><th>Estado</th><th>Serv.</th></tr>" +
+    p.repartidores.map((m) => `<tr><td>${esc(m.nombre)}</td><td>${esc(NOMBRE_PRESTADOR[m.prestador] || m.prestador)}</td><td>${esc(m.estado)}</td><td>${m.servicios}</td></tr>`).join("");
+  $("tTal").innerHTML = "<tr><th>Taller</th><th>Tipo</th><th>Baterías</th><th>Combustible</th></tr>" +
+    p.talleres.map((x) => `<tr><td>${esc(x.nombre)}</td><td>${x.demo ? "demo" : "registrado"}</td><td>${x.baterias.reduce((a, b) => a + b.stock, 0)} en inventario</td><td>${Object.entries(x.combustibles).filter(([, c]) => c.disponible).map(([k]) => esc(k)).join(", ") || "—"}</td></tr>`).join("");
+  $("log").innerHTML = p.log.map((e) => `${new Date(e.t * 1000).toLocaleTimeString()} · ${esc(e.evento)} ${e.solicitud_id ? "(" + esc(e.solicitud_id) + ")" : ""}`).join("<br>");
+});
+</script></body></html>

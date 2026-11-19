@@ -1,0 +1,172 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuentas del negocio</title>
+<link rel="stylesheet" href="/static/estilo.css?v=13">
+<style>
+  .centrado { max-width:880px; margin:0 auto; }
+  .tabla { overflow-x:auto; }
+  .tabla table { font-size:13px; min-width:640px; }
+  .tabla td.num, .tabla th.num { text-align:right; white-space:nowrap; }
+  .neg { color:#b3261e; font-weight:bold; } .pos { color:#1d7a55; font-weight:bold; }
+  .grid3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; }
+  .grid2 { display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; }
+  @media (max-width:560px) { .grid3 { grid-template-columns: 1fr; } }
+  details { margin-top:6px; } details summary { cursor:pointer; color:var(--guinda); font-weight:bold; }
+  details ul { padding-left:18px; font-size:13px; line-height:1.5; }
+</style></head><body>
+<header><h1>Cuentas del negocio</h1></header>
+<div class="centrado">
+
+<div class="tarjeta">
+  <h2>Cuánto cobras y cuánto te queda</h2>
+  <div class="sub">Los números marcados como <b>supuesto</b> son estimaciones mías: cámbialos con tus datos reales (abajo). Cuanto más servicios reales termines, más se afinan solos.</div>
+  <label style="display:flex;gap:8px;align-items:center;color:#222"><input type="checkbox" id="reales" style="width:auto"> Usar los tiempos reales medidos, donde ya los haya</label>
+  <div class="tabla" style="margin-top:8px"><table id="tabla"></table></div>
+  <div class="sub" style="margin-top:8px">
+    <b>Cobras</b>: el cargo por servicio a domicilio (la gasolina se cobra al mismo precio al que se compra, así que no deja ganancia). <b>Cuesta</b>: tiempo del repartidor + traslado + desgaste de la herramienta.
+    <b>Sugerido</b>: el cargo con el que ganas tu margen objetivo. <b>Equilibrio</b>: servicios al mes para pagar tus gastos fijos con ese servicio solamente.
+  </div>
+  <div id="lectura" class="aviso" style="display:none"></div>
+</div>
+
+<div class="tarjeta">
+  <h2>Tus cargos por servicio</h2>
+  <div class="sub">Es lo que el cliente ve antes de pedir. Mismo precio para todos, sin cargos extra: cobrar barato trae muchos clientes pero casi sin ganancia; cobrar caro deja más por servicio pero casi nadie pide. Pruébalo y mide.</div>
+  <div class="grid3">
+    <div><label>Gasolina</label><input id="cGas" type="number" min="0" max="2000" step="5"></div>
+    <div><label>Aire a las llantas</label><input id="cAire" type="number" min="0" max="2000" step="5"></div>
+    <div><label>Paso de corriente</label><input id="cCorr" type="number" min="0" max="2000" step="5"></div>
+  </div>
+  <div id="errorCargos" class="alerta" style="display:none"></div>
+  <button id="btnCargos" style="width:100%;margin-top:10px">Guardar cargos</button>
+</div>
+
+<div class="tarjeta">
+  <h2>Tiempos reales</h2>
+  <div id="reales2"></div>
+</div>
+
+<div class="tarjeta">
+  <h2>Lo que llevas vendido</h2>
+  <div id="resumen"></div>
+</div>
+
+<div class="tarjeta">
+  <h2>Tus supuestos de costos</h2>
+  <div class="sub">Cámbialos por tus números reales. La bomba de $200 es dato tuyo; lo demás son estimaciones mías.</div>
+  <div class="grid3">
+    <div><label>Costo por hora del repartidor ($)</label><input id="kHora" type="number" min="0" step="1"></div>
+    <div><label>Costo por kilómetro ($)</label><input id="kKm" type="number" min="0" step="0.5"></div>
+    <div><label>Km por servicio (ida y vuelta)</label><input id="kKms" type="number" min="0" step="1"></div>
+  </div>
+  <label>Minutos por servicio (desde que acepta hasta que termina)</label>
+  <div class="grid3">
+    <div><label>Gasolina</label><input id="mGas" type="number" min="1" step="1"></div>
+    <div><label>Aire</label><input id="mAire" type="number" min="1" step="1"></div>
+    <div><label>Corriente</label><input id="mCorr" type="number" min="1" step="1"></div>
+  </div>
+  <label>Herramienta: lo que cuesta ($) y cuántos servicios aguanta</label>
+  <div class="grid3">
+    <div><label>Bomba ($)</label><input id="hBomba" type="number" min="0" step="10"></div>
+    <div><label>Cables ($)</label><input id="hCables" type="number" min="0" step="10"></div>
+    <div><label>Bidón ($)</label><input id="hBidon" type="number" min="0" step="10"></div>
+  </div>
+  <div class="grid3">
+    <div><label>Servicios por bomba</label><input id="vBomba" type="number" min="1" step="10"></div>
+    <div><label>Servicios por juego de cables</label><input id="vCables" type="number" min="1" step="10"></div>
+    <div><label>Servicios por bidón</label><input id="vBidon" type="number" min="1" step="10"></div>
+  </div>
+  <div class="grid3">
+    <div><label>Margen objetivo (%)</label><input id="kMargen" type="number" min="0" max="90" step="1"></div>
+    <div><label>Gastos fijos al mes ($)</label><input id="kFijos" type="number" min="0" step="50"></div>
+    <div><label>Comisión de pago (%)</label><input id="kComision" type="number" min="0" max="50" step="0.5"></div>
+  </div>
+  <div id="errorCostos" class="alerta" style="display:none"></div>
+  <div id="okCostos" class="aviso" style="display:none">Guardado.</div>
+  <button id="btnCostos" style="width:100%;margin-top:10px">Guardar supuestos</button>
+</div>
+
+<div class="tarjeta">
+  <h2>Lo que suele no verse</h2>
+  <details><summary>Cosas del negocio real que esta tabla no calcula</summary>
+    <ul>
+      <li><b>Tu tiempo</b>: si repartes tú, ponte sueldo en «costo por hora»; si no, la ganancia es solo tu sueldo disfrazado.</li>
+      <li><b>Horas sin pedidos</b>: la tabla cuenta el tiempo de cada servicio, no las horas esperando. Con pocos pedidos, esas horas pesan más que el cargo.</li>
+      <li><b>Gasolina</b>: llevarla es riesgoso (incendio, derrames). Usa recipientes homologados para combustible, en cantidades pequeñas, y averigua si vender o transportar combustible requiere permisos o seguros antes de cobrarlo.</li>
+      <li><b>Seguro y accidentes</b>: un accidente de moto o un cable mal puesto que dañe la electrónica de un auto cuesta mucho más que varios servicios. Pregunta por un seguro de responsabilidad civil.</li>
+      <li><b>Impuestos y facturas</b>: si cobras, tendrás que darte de alta y facturar cuando te lo pidan. Consúltalo con un contador.</li>
+      <li><b>Repartidores</b>: pagarles por servicio, por hora o contratarlos tiene reglas laborales distintas. Define eso antes de crecer.</li>
+      <li><b>Clientes que no pagan, cancelaciones y quejas</b>: se pierde el viaje. Mide cuántos pasan y súmalo al costo.</li>
+      <li><b>Noche y zonas riesgosas</b>: más peligro y más tiempo de traslado; a lo mejor conviene cobrar distinto, siempre avisándole al cliente antes de pedir.</li>
+      <li><b>Cuánto tarda de verdad</b>: la app mide cada servicio real. Cuando lo hagas tú mismo varias veces y sepas el tiempo exacto, ya puedes contratar a alguien para hacerlo.</li>
+    </ul>
+  </details>
+</div>
+</div>
+<div class="pie">Estimaciones para tomar decisiones, no asesoría contable ni legal.</div>
+
+<script src="/static/comun.js?v=13"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x) => x == null ? "—" : Math.round(x * 100) + " %";
+const min = (x) => x == null ? "—" : x.toFixed(1) + " min";
+let llenos = false;
+const msg = (id, t) => { $(id).textContent = t; $(id).style.display = "block"; };
+
+function pintar(d) {
+  const c = d.costos;
+  if (!llenos) {
+    $("cGas").value = d.cargos.gasolina; $("cAire").value = d.cargos.aire_llantas; $("cCorr").value = d.cargos.paso_de_corriente;
+    $("kHora").value = c.hora_repartidor; $("kKm").value = c.costo_km; $("kKms").value = c.km_ida_vuelta;
+    $("mGas").value = c.minutos.gasolina; $("mAire").value = c.minutos.aire_llantas; $("mCorr").value = c.minutos.paso_de_corriente;
+    $("hBomba").value = c.kit.bomba; $("hCables").value = c.kit.cables; $("hBidon").value = c.kit.bidon;
+    $("vBomba").value = c.vida_util_servicios.bomba; $("vCables").value = c.vida_util_servicios.cables; $("vBidon").value = c.vida_util_servicios.bidon;
+    $("kMargen").value = Math.round(c.margen_objetivo * 100); $("kFijos").value = c.gastos_fijos_mes; $("kComision").value = +(c.comision_pago * 100).toFixed(2);
+    llenos = true;
+  }
+  $("tabla").innerHTML = "<tr><th>Servicio</th><th class='num'>Cobras</th><th class='num'>Cuesta</th><th class='num'>Te queda</th><th class='num'>Margen</th><th class='num'>Sugerido</th><th class='num'>Cliente paga</th><th class='num'>Equilibrio</th></tr>" +
+    d.filas.map((f) => `<tr><td>${esc(f.nombre)}<br><span class="sub">${f.minutos.toFixed(0)} min · ${esc(f.fuente)}</span></td>
+      <td class="num">${fmtMXN(f.cargo)}</td><td class="num">${fmtMXN(f.costo)}</td>
+      <td class="num ${f.ganancia < 0 ? "neg" : "pos"}">${fmtMXN(f.ganancia)}</td><td class="num ${f.ganancia < 0 ? "neg" : ""}">${pct(f.margen)}</td>
+      <td class="num">${fmtMXN(f.cargo_sugerido)}</td><td class="num">${fmtMXN(f.total)}</td>
+      <td class="num">${f.equilibrio == null ? "no alcanza" : f.equilibrio + " al mes"}</td></tr>`).join("");
+  const perdidas = d.filas.filter((f) => f.ganancia < 0), bajos = d.filas.filter((f) => f.ganancia >= 0 && f.margen < c.margen_objetivo);
+  const av = $("lectura");
+  if (perdidas.length) { av.innerHTML = `<b>Pierdes dinero</b> en: ${perdidas.map((f) => esc(f.nombre)).join(", ")}. El cargo no cubre ni el costo del servicio.`; av.style.display = "block"; }
+  else if (bajos.length) { av.innerHTML = `Ganas, pero por debajo de tu margen objetivo (${pct(c.margen_objetivo)}) en: ${bajos.map((f) => esc(f.nombre)).join(", ")}. Mira la columna «Sugerido».`; av.style.display = "block"; }
+  else av.style.display = "none";
+
+  const tipos = { gasolina: "Gasolina", aire_llantas: "Aire a las llantas", paso_de_corriente: "Paso de corriente" }, ent = Object.entries(d.reales);
+  $("reales2").innerHTML = ent.length ? `<div class="tabla"><table><tr><th>Servicio</th><th class="num">Servicios</th><th class="num">Espera del cliente</th><th class="num">Camino</th><th class="num">Atención</th><th class="num">Total</th></tr>` +
+    ent.map(([k, r]) => `<tr><td>${esc(tipos[k] || k)}</td><td class="num">${r.n}</td><td class="num">${min(r.espera_min)}</td><td class="num">${min(r.viaje_min)}</td><td class="num">${min(r.servicio_min)}</td><td class="num"><b>${min(r.total_min)}</b></td></tr>`).join("") + "</table></div>"
+    : `<div class="sub">Todavía no hay servicios reales terminados, así que las cuentas usan supuestos. Cada servicio real que termine un repartidor guarda cuánto tardó. Los de repartidores simulados no cuentan.</div>`;
+  const r = d.resumen;
+  $("resumen").innerHTML = r.servicios
+    ? `Servicios reales terminados: <b>${r.servicios}</b><br>Cobrado en total: <b>${fmtMXN(r.ingresos)}</b> (de eso, ${fmtMXN(r.cargos)} por servicio a domicilio)<br>Costo estimado de esos servicios: <b>${fmtMXN(r.costo_estimado)}</b><br>Ganancia estimada: <b class="${r.ganancia_estimada < 0 ? "neg" : "pos"}">${fmtMXN(r.ganancia_estimada)}</b>, antes de gastos fijos<br><span class="sub">Estimación con tus supuestos. No incluye gastos fijos, ni horas sin pedidos, ni impuestos.</span>`
+    : `<div class="sub">Aún no hay servicios reales terminados. ${r.simulados ? `(${r.simulados} de repartidores simulados no cuentan.)` : ""}</div>`;
+}
+
+async function cargar() { pintar(await api(`/api/negocio?reales=${$("reales").checked}`)); }
+$("reales").onchange = () => cargar().catch((e) => msg("errorCostos", e.message));
+
+$("btnCargos").onclick = async () => {
+  $("errorCargos").style.display = "none";
+  try {
+    await api("/api/panel/precios", "POST", { servicios: { gasolina: +$("cGas").value, aire_llantas: +$("cAire").value, paso_de_corriente: +$("cCorr").value } });
+    await cargar();
+  } catch (e) { msg("errorCargos", e.message); }
+};
+$("btnCostos").onclick = async () => {
+  $("errorCostos").style.display = "none"; $("okCostos").style.display = "none";
+  try {
+    const d = await api(`/api/negocio?reales=${$("reales").checked}`, "POST", {
+      hora_repartidor: +$("kHora").value, costo_km: +$("kKm").value, km_ida_vuelta: +$("kKms").value,
+      minutos: { gasolina: +$("mGas").value, aire_llantas: +$("mAire").value, paso_de_corriente: +$("mCorr").value },
+      kit: { bomba: +$("hBomba").value, cables: +$("hCables").value, bidon: +$("hBidon").value },
+      vida_util_servicios: { bomba: +$("vBomba").value, cables: +$("vCables").value, bidon: +$("vBidon").value },
+      margen_objetivo: +$("kMargen").value / 100, gastos_fijos_mes: +$("kFijos").value, comision_pago: +$("kComision").value / 100 });
+    pintar(d); $("okCostos").style.display = "block"; setTimeout(() => { $("okCostos").style.display = "none"; }, 3000);
+  } catch (e) { msg("errorCostos", e.message); }
+};
+cargar().catch((e) => msg("errorCostos", e.message));
+setInterval(() => cargar().catch(() => {}), 30000);       // se refresca solo conforme terminan servicios
+</script></body></html>
