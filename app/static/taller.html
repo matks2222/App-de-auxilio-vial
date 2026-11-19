@@ -1,0 +1,220 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel del taller</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<link rel="stylesheet" href="/static/estilo.css?v=13">
+<style>
+  .fila-bat { display:grid; grid-template-columns: 1fr 1fr; gap:6px; padding:8px 0; border-bottom:1px solid #eee; }
+  .fila-bat .ancho { grid-column: 1 / -1; }
+  .fila-bat label { margin:2px 0; font-size:12px; }
+  .fila-comb { display:grid; grid-template-columns: 28px 1fr 110px; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #eee; }
+  .fila-comb input[type=checkbox] { width:20px; height:20px; padding:0; }
+  .pedido { padding:8px 0; border-bottom:1px solid #eee; font-size:13px; }
+  .centrado { max-width:760px; margin:0 auto; }
+</style></head><body>
+<header><h1>Panel del taller</h1><a href="/">Inicio</a></header>
+<div id="mapa"></div>
+<div id="leyenda" class="sub" style="padding:4px 12px"></div>
+
+<div class="centrado">
+<!-- 1) Registro -->
+<div id="registro" class="tarjeta" style="display:none">
+  <h2>Registra tu taller</h2>
+  <div class="sub">Tu taller aparece en el mapa, publica sus precios y recibe los pedidos de gasolina de los clientes cercanos.
+    Marca dónde está tu taller: usa tu ubicación o toca el mapa.</div>
+  <div class="fila" style="margin:8px 0"><button id="btnGPS" class="sec">📍 Usar mi ubicación</button></div>
+  <div id="posTexto" class="sub">Ubicación: sin marcar</div>
+  <div id="bloqueCodigo" style="display:none"><label>Código de acceso (te lo da el administrador)</label><input id="rCodigo" maxlength="100" autocomplete="off"></div>
+  <div id="talReto" style="display:none;margin-top:8px" class="tarjeta"><b>Verificación de seguridad</b><div id="talRetoPregunta" style="font-size:18px;margin:6px 0"></div><input id="talRetoResp" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="Tu respuesta" style="font-size:18px"></div>
+  <label>Nombre del taller</label><input id="rNombre" maxlength="60" placeholder="Ej. Taller y Refaccionaria López">
+  <label>Teléfono (lo ve el repartidor que recoge el pedido)</label><input id="rTel" maxlength="30" inputmode="tel" placeholder="Opcional">
+  <label>Dirección</label><input id="rDir" maxlength="120" placeholder="Calle, número y colonia">
+  <div id="errorReg" class="alerta" style="display:none"></div>
+  <button id="btnRegistro" style="width:100%;margin-top:10px">Registrar taller</button>
+  <div class="aviso">Después de registrarte tendrás que marcar qué combustible vendes: mientras no marques nada, tu taller no surtirá pedidos.</div>
+</div>
+
+<!-- 2) Panel -->
+<div id="panel" style="display:none">
+  <div class="tarjeta">
+    <h2 id="tNombre"></h2>
+    <div id="tInfo" class="sub"></div>
+    <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--guinda)">Editar datos del taller</summary>
+      <div class="sub" style="margin-top:6px">Para cambiar la ubicación, toca el mapa y guarda.</div>
+      <label>Nombre</label><input id="eNombre" maxlength="60">
+      <label>Teléfono</label><input id="eTel" maxlength="30" inputmode="tel">
+      <label>Dirección</label><input id="eDir" maxlength="120">
+      <div id="ePos" class="sub" style="margin-top:6px"></div>
+      <button id="btnDatos" class="sec" style="width:100%;margin-top:8px">Guardar datos</button>
+    </details>
+  </div>
+
+  <div class="tarjeta">
+    <h2>⛽ Combustible</h2>
+    <div class="sub">Marca lo que vendes y tu precio por litro (pesos). Si ningún taller cercano lo tiene, se cotiza con el precio de referencia.</div>
+    <div id="combustibles"></div>
+  </div>
+
+  <div class="tarjeta" id="cardBaterias">
+    <h2>🔋 Baterías en inventario</h2>
+    <div class="sub">Para cada categoría el cliente ve la opción más barata que tengas con inventario. El precio incluye la instalación. Con inventario en 0 no se te asignan pedidos de esa batería.</div>
+    <div id="baterias"></div>
+    <button id="btnAddBat" class="sec" style="width:100%;margin-top:8px">+ Agregar batería</button>
+  </div>
+
+  <div class="tarjeta">
+    <div id="errorCat" class="alerta" style="display:none"></div>
+    <div id="okCat" class="aviso" style="display:none">Catálogo guardado.</div>
+    <button id="btnCatalogo" style="width:100%">Guardar combustible y baterías</button>
+  </div>
+
+  <div class="tarjeta">
+    <h2>📦 Pedidos por surtir</h2>
+    <div class="sub">Un repartidor pasará a recoger estos productos a tu taller.</div>
+    <div id="pedidos"></div>
+  </div>
+
+  <div class="tarjeta">
+    <h2>🧾 Ventas completadas</h2>
+    <div id="totalVendido" class="estado"></div>
+    <div id="ventas"></div>
+  </div>
+
+  <div class="tarjeta">
+    <button id="btnSalir" class="sec" style="width:100%">Dejar de administrar este taller en este dispositivo</button>
+    <div class="sub" style="margin-top:6px">El taller sigue registrado. Quien tenga este dispositivo puede editarlo.</div>
+  </div>
+</div>
+</div>
+<div class="pie">La app no procesa pagos: el repartidor cobra el precio que vio el cliente. Los precios de referencia no son oficiales.</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="/static/comun.js?v=13"></script>
+<script>
+const mapa = crearMapa("mapa");
+const $ = (id) => document.getElementById(id);
+const attr = (s) => esc(s).replace(/"/g, "&quot;");
+$("leyenda").textContent = LEYENDA;
+
+let tid = localStorage.getItem("tid"), pos = null, marcaYo = null, config = null, taller = null, formLleno = false, bats = [], cancelarSub = null;
+const ESTADOS = { pendiente: "Buscando repartidor", ofertada: "Esperando que un repartidor acepte", aceptada: "Repartidor en camino", en_sitio: "Repartidor con el cliente" };
+const mostrarMsg = (id, t) => { $(id).textContent = t; $(id).style.display = "block"; };
+
+api("/api/config").then((c) => { config = c; $("bloqueCodigo").style.display = c.requiere_codigo ? "block" : "none"; if (taller && !formLleno) llenarFormularios(); });
+api("/api/talleres").then((ts) => marcarTalleres(mapa, ts.filter((t) => t.id !== tid))).catch(() => {});
+
+// ---------------------------------------------------------------- ubicación
+function fijarPos(lat, lon) {
+  pos = { lat, lon };
+  if (marcaYo) marcaYo.setLatLng([lat, lon]); else marcaYo = L.marker([lat, lon], { icon: pin("🛠️", "#7B1E3A") }).addTo(mapa);
+  $("posTexto").textContent = `Ubicación marcada: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  $("ePos").textContent = `Nueva ubicación (se guarda con «Guardar datos»): ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+mapa.on("click", (e) => fijarPos(e.latlng.lat, e.latlng.lng));
+$("btnGPS").onclick = () => {
+  if (!navigator.geolocation) return mostrarMsg("errorReg", "Tu navegador no ofrece geolocalización. Toca el mapa para marcar tu taller.");
+  navigator.geolocation.getCurrentPosition(
+    (p) => { fijarPos(p.coords.latitude, p.coords.longitude); mapa.setView([p.coords.latitude, p.coords.longitude], 16); },
+    () => mostrarMsg("errorReg", "No se pudo obtener tu ubicación (en el celular hace falta HTTPS). Toca el mapa para marcarla."));
+};
+
+// ---------------------------------------------------------------- registro
+$("btnRegistro").onclick = async () => {
+  $("errorReg").style.display = "none";
+  if (!$("rNombre").value.trim()) return mostrarMsg("errorReg", "Escribe el nombre del taller.");
+  if (!pos) return mostrarMsg("errorReg", "Marca dónde está tu taller (usa tu ubicación o toca el mapa).");
+  try {
+    const r = await api("/api/talleres", "POST", { ...datosReto({ bloque: "talReto", pregunta: "talRetoPregunta", respuesta: "talRetoResp" }), codigo: $("rCodigo").value, nombre: $("rNombre").value, telefono: $("rTel").value, direccion: $("rDir").value, lat: pos.lat, lon: pos.lon });
+    tid = r.id; localStorage.setItem("tid", tid); pos = null; arrancar();
+  } catch (e) { pedirReto(e, { bloque: "talReto", pregunta: "talRetoPregunta", respuesta: "talRetoResp" }); mostrarMsg("errorReg", e.message); }
+};
+
+// ---------------------------------------------------------------- panel
+function arrancar() {
+  $("registro").style.display = "none"; $("panel").style.display = "block";
+  if (cancelarSub) cancelarSub();
+  cancelarSub = suscribir("taller", tid, pintar);
+}
+
+function ajustarServicios() {          // la batería está apagada: se oculta su inventario mientras no se ofrezca
+  const hayBat = config.servicios_activos.includes("bateria_nueva");
+  $("cardBaterias").style.display = hayBat ? "block" : "none";
+  $("btnCatalogo").textContent = hayBat ? "Guardar combustible y baterías" : "Guardar combustible";
+}
+function llenarFormularios() {
+  ajustarServicios();
+  $("eNombre").value = taller.nombre; $("eTel").value = taller.telefono; $("eDir").value = taller.direccion;
+  const ref = config.precios;
+  $("combustibles").innerHTML = Object.entries(ref.combustibles).map(([k, v]) => {
+    const c = taller.combustibles[k] || { litro: v.litro, disponible: false };
+    return `<div class="fila-comb"><input type="checkbox" id="cb_${k}" ${c.disponible ? "checked" : ""}>
+      <label for="cb_${k}" style="margin:0;color:#222">${esc(v.nombre)}<br><span class="sub">Referencia: ${fmtMXN(v.litro)}</span></label>
+      <input type="number" id="cp_${k}" min="5" max="100" step="0.01" value="${c.litro}" aria-label="Precio por litro de ${attr(v.nombre)}"></div>`;
+  }).join("");
+  bats = taller.baterias.map((b) => ({ ...b }));
+  pintarBaterias();
+  formLleno = true;          // los formularios se llenan una sola vez para no borrar lo que estás escribiendo
+}
+
+function pintarBaterias() {
+  const cats = config.precios.baterias;
+  $("baterias").innerHTML = bats.length ? bats.map((b, i) => `<div class="fila-bat" data-i="${i}">
+      <div class="ancho"><label>Marca y modelo</label><input class="bNombre" maxlength="60" value="${attr(b.nombre)}"></div>
+      <div><label>Categoría</label><select class="bCat">${Object.entries(cats).map(([k, v]) => `<option value="${k}" ${b.categoria === k ? "selected" : ""}>${esc(v.nombre)}</option>`).join("")}</select></div>
+      <div><label>Precio con instalación (pesos)</label><input class="bPrecio" type="number" min="100" max="50000" step="10" value="${b.precio}"></div>
+      <div><label>En inventario</label><input class="bStock" type="number" min="0" max="999" step="1" value="${b.stock}"></div>
+      <div style="display:flex;align-items:flex-end"><button class="mal bQuitar" style="width:100%">Quitar</button></div>
+    </div>`).join("") : '<div class="sub" style="margin-top:8px">Aún no tienes baterías. Agrega la primera.</div>';
+  document.querySelectorAll(".bQuitar").forEach((b) => b.onclick = () => { leerBaterias(); bats.splice(+b.closest(".fila-bat").dataset.i, 1); pintarBaterias(); });
+}
+
+function leerBaterias() {      // pasa lo que está escrito en pantalla al arreglo, antes de agregar o quitar filas
+  document.querySelectorAll("#baterias .fila-bat").forEach((f) => {
+    const b = bats[+f.dataset.i];
+    b.nombre = f.querySelector(".bNombre").value; b.categoria = f.querySelector(".bCat").value;
+    b.precio = parseFloat(f.querySelector(".bPrecio").value); b.stock = parseInt(f.querySelector(".bStock").value, 10);
+  });
+}
+$("btnAddBat").onclick = () => { leerBaterias(); bats.push({ nombre: "", categoria: "estandar", precio: config.precios.baterias.estandar.precio, stock: 1 }); pintarBaterias(); };
+
+$("btnCatalogo").onclick = async () => {
+  $("errorCat").style.display = "none"; $("okCat").style.display = "none";
+  leerBaterias();
+  const combustibles = {};
+  Object.keys(config.precios.combustibles).forEach((k) => { combustibles[k] = { litro: parseFloat($("cp_" + k).value), disponible: $("cb_" + k).checked }; });
+  if (bats.some((b) => !b.nombre.trim())) return mostrarMsg("errorCat", "Cada batería necesita marca y modelo.");
+  if (bats.some((b) => isNaN(b.precio) || isNaN(b.stock))) return mostrarMsg("errorCat", "Revisa el precio y el inventario de tus baterías.");
+  if (Object.values(combustibles).some((c) => isNaN(c.litro))) return mostrarMsg("errorCat", "Revisa los precios por litro.");
+  try {
+    await api(`/api/talleres/${tid}/catalogo`, "POST", { combustibles, baterias: bats });
+    $("okCat").style.display = "block"; setTimeout(() => { $("okCat").style.display = "none"; }, 3000);
+  } catch (e) { mostrarMsg("errorCat", e.message); }
+};
+
+$("btnDatos").onclick = async () => {
+  try {
+    await api(`/api/talleres/${tid}/datos`, "POST", { nombre: $("eNombre").value, telefono: $("eTel").value, direccion: $("eDir").value, lat: pos ? pos.lat : null, lon: pos ? pos.lon : null });
+    $("ePos").textContent = "Datos guardados.";
+  } catch (e) { alert(e.message); }
+};
+$("btnSalir").onclick = () => { if (confirm("¿Dejar de administrar este taller en este dispositivo?")) { localStorage.removeItem("tid"); location.reload(); } };
+
+function pintar(snap) {
+  const t = snap.taller;
+  if (!t) { localStorage.removeItem("tid"); tid = null; location.reload(); return; }     // el taller ya no existe (p. ej. se reinició el servidor)
+  taller = t;
+  $("tNombre").textContent = "🛠️ " + t.nombre;
+  $("tInfo").innerHTML = [t.direccion && esc(t.direccion), t.telefono && "Tel. " + esc(t.telefono)].filter(Boolean).join(" · ") || "Sin dirección ni teléfono";
+  if (!marcaYo) { marcaYo = L.marker([t.lat, t.lon], { icon: pin("🛠️", "#7B1E3A") }).addTo(mapa); mapa.setView([t.lat, t.lon], 15); }
+  if (!formLleno && config) llenarFormularios();
+  const act = t.pedidos_activos || [];
+  $("pedidos").innerHTML = act.length ? act.map((s) => `<div class="pedido"><b>${esc(s.cotizacion.concepto)}</b> · ${fmtMXN(s.cotizacion.total)}<br>
+      <span class="sub">${esc(ESTADOS[s.estado] || s.estado)} · pedido ${esc(s.id)}</span></div>`).join("")
+    : '<div class="sub" style="margin-top:8px">Sin pedidos por ahora.</div>';
+  $("totalVendido").textContent = `Total vendido: ${fmtMXN(t.total_vendido)}`;
+  $("ventas").innerHTML = t.ventas.length ? t.ventas.slice(0, 20).map((v) => `<div class="pedido">${esc(v.concepto)} · <b>${fmtMXN(v.total)}</b>
+      <span class="sub">(producto ${fmtMXN(v.subtotal)} + servicio) · ${new Date(v.t * 1000).toLocaleString("es-MX")}</span></div>`).join("")
+    : '<div class="sub" style="margin-top:8px">Todavía no hay ventas completadas.</div>';
+}
+
+if (tid) arrancar(); else $("registro").style.display = "block";
+</script></body></html>

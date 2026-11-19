@@ -190,9 +190,29 @@ prototipo a internet y, como no tiene autenticación, úsalo solo un rato y con 
 - `render.yaml`: configuración para publicar en Render.
 - `app/main.py`: servidor FastAPI, WebSocket, enlaces cortos `/q/código`, imágenes QR y rutas de las páginas.
 - `app/static/`: páginas del cliente, el repartidor, el taller, los QR (`qr.html`), el letrero imprimible (`letrero.html`), las cuentas (`negocio.html`) y el panel (Leaflet con OpenStreetMap).
-- `tests/`: 92 pruebas automáticas (`python -m pytest tests -q`).
+- `tests/`: 107 pruebas automáticas (`python -m pytest tests -q`).
 
 Los eventos de la tabla `eventos` (en `despacho.db`) sirven para calibrar después el simulador con datos reales.
+
+## Registro de repartidores y protección contra registros masivos (v13)
+
+- En la pantalla principal (la del cliente) hay un botón **Iniciar sesión** a la derecha del encabezado: lleva a `/repartidor`, donde el repartidor se registra o entra a su cuenta en ese teléfono.
+- Con la app publicada (`ADMIN_PASSWORD` definida) el registro de repartidores y talleres se protege solo, por capas:
+  1. **Por conexión**: máximo 5 registros por hora desde la misma IP (`REGISTROS_POR_IP_HORA`).
+  2. **Reto al azar**: si en 10 minutos hay 6 registros o más (`REGISTROS_RETO`), cada registro nuevo debe resolver una suma al azar, firmada, que vence en 5 min y solo sirve una vez.
+  3. **Bloqueo automático**: si hay 15 registros (`REGISTROS_BLOQUEO`) o 30 códigos incorrectos en 10 minutos, el registro se cierra solo `BLOQUEO_MINUTOS` (20) minutos.
+  4. **Tope** de repartidores reales a la vez (`MAX_REPARTIDORES`, 300).
+- El dueño, en **/panel → Registro de repartidores**, ve el estado, puede cerrar o abrir el registro y quitar un bloqueo. Con la sesión de dueño iniciada, nada de esto le estorba.
+- Todas las variables son opcionales (ya traen un valor por omisión). Las cuentas se cuentan en memoria: al reiniciar el servidor se reinician.
+
+## Tiempo de llegada por calles (opcional, v13)
+
+Por omisión el tiempo de llegada usa la fórmula (línea recta × rodeo ÷ velocidad). Se puede conectar un servicio de rutas para que use las calles reales:
+
+- Se activa con la variable `RUTAS_API_KEY` (clave de OpenRouteService). Sin ella no cambia nada. Opcionales: `RUTAS_URL`, `RUTAS_MAX_DIA` (consultas por día, 1000).
+- Nunca hace esperar a la pantalla: contesta con la fórmula y la consulta se hace en segundo plano; se guarda 45 s y se reutiliza si el repartidor casi no se movió. Si el servicio falla, usa la fórmula.
+- **No se usa Google Maps a propósito**: las condiciones de Google para la Routes API prohíben usar sus resultados junto con un mapa que no sea de Google (esta app usa OpenStreetMap/Leaflet). Para usar Google habría que cambiar también el mapa a Google Maps.
+- Probado con respuestas simuladas, no contra el servicio real: revisa en su página los límites vigentes de tu plan.
 
 ## Cambios respecto a la versión anterior
 
