@@ -135,21 +135,6 @@ y después se le vuelve a ofrecer si nadie más lo toma; y un pedido que nadie a
 
 La prioridad de cada solicitud sale hoy de reglas sencillas. **Pendiente:** reemplazarlas por el sistema difuso del proyecto.
 
-## Publicar en internet (para que siempre funcione)
-
-Tu computadora no tiene que estar prendida: la app corre en un servidor. Estos pasos usan Render (render.com), que ya viene configurado en `render.yaml`.
-
-**Qué se necesita:** una cuenta de GitHub, una cuenta de Render y, si quieres, un dominio propio. El plan gratuito de Render **no sirve** (se duerme y borra el disco, y con él tus QR y precios);
-hace falta el plan `starter` con un disco, que se cobran aparte: mira los precios en tu panel de Render antes de confirmar.
-
-1. **Sube el proyecto a GitHub.** Crea un repositorio privado y sube los archivos de esta carpeta (que `render.yaml` quede en la raíz del repositorio). No subas `despacho.db`.
-2. **En Render:** *New +* → *Blueprint* → elige tu repositorio. Render lee `render.yaml`.
-3. **Te pedirá dos valores.** `ADMIN_PASSWORD`: tu contraseña para `/panel`, `/qr` y `/negocio` (larga y única). `CODIGO_COLABORADORES`: el código que les das a repartidores y talleres para registrarse.
-4. **Confirma y espera** a que el servicio diga *Live*. Render te da una dirección `https://...onrender.com` con https automático.
-5. **Prueba:** abre esa dirección (ves la pantalla de pedir ayuda), entra a `/login` con tu contraseña y revisa `/panel`.
-6. **Dominio propio:** en Render, *Settings → Custom Domains*, agrega tu dominio y crea en tu registrador los registros DNS que Render te indique. Cuando funcione, escribe esa dirección en `/qr` y **recién entonces imprime los letreros**.
-
-Si Render se queja de la versión de Python, cambia `PYTHON_VERSION` en `render.yaml` por una que ofrezca. Otros servicios (Railway, Fly.io, un servidor propio) sirven si tienen disco persistente, una sola instancia y las mismas variables.
 
 **Variables de entorno**
 
