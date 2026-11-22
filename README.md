@@ -4,6 +4,10 @@ Prototipo académico desarrollado en ESCOM-IPN. Cuando alguien se queda varado c
 
 Es un prototipo: no tiene pagos ni verificación de identidad, y no sustituye al 911.
 
+## Página en línea
+
+Se puede probar en **https://tallerenruta.com/**. La pantalla de inicio es la del cliente ("Pedir ayuda"), y los repartidores entran desde el botón "Iniciar sesión", que lleva a `/repartidor`.
+
 ## Servicios
 
 El cliente solo ve tres opciones, cada una con su precio final antes de pedir:
