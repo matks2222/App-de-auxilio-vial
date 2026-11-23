@@ -8,6 +8,17 @@ Es un prototipo: no tiene pagos ni verificación de identidad, y no sustituye al
 
 Se puede probar en **https://tallerenruta.com/**. La pantalla de inicio es la del cliente ("Pedir ayuda"), y los repartidores entran desde el botón "Iniciar sesión", que lleva a `/repartidor`.
 
+## Capturas
+
+<p>
+  <img src="docs/cliente.png" width="260" alt="Pantalla del cliente: Pedir ayuda">
+  <img src="docs/repartidor.png" width="260" alt="Oferta de servicio al repartidor">
+</p>
+<p>
+  <img src="docs/panel.png" width="400" alt="Panel de despacho con repartidores simulados">
+  <img src="docs/negocio.png" width="400" alt="Cuentas del negocio: costos, ganancia y margen">
+</p>
+
 ## Servicios
 
 El cliente solo ve tres opciones, cada una con su precio final antes de pedir:
