@@ -70,7 +70,7 @@ function fmtMXN(n) { return new Intl.NumberFormat("es-MX", { style: "currency", 
 
 // ---- Menú común: se inserta debajo del encabezado en todas las páginas para moverse entre ellas
 (function () {
-  const ENLACES = [["/menu", "🏠", "Inicio"], ["/cliente", "🚗", "Pedir ayuda"], ["/repartidor", "🛵", "Repartidor"], ["/taller", "🛠️", "Taller"], ["/qr", "🔳", "QR"], ["/negocio", "💰", "Negocio"], ["/panel", "📊", "Panel"]];
+  const ENLACES = [["/menu", "Inicio"], ["/repartidor", "Repartidor"]];          // lo demás (cliente, taller, QR, negocio, panel) está en Inicio, el menú de administración
   const ALIAS = { "/": "/menu", "/prestador": "/repartidor", "/mecanico": "/repartidor" };
   function poner() {
     const h = document.querySelector("header");
@@ -83,7 +83,7 @@ function fmtMXN(n) { return new Intl.NumberFormat("es-MX", { style: "currency", 
       const aqui = ALIAS[location.pathname] || location.pathname;
       const nav = document.createElement("nav");
       nav.className = "menu";
-      nav.innerHTML = ENLACES.map(([href, ico, txt]) => `<a href="${href}"${href === aqui ? ' class="actual" aria-current="page"' : ""}><span aria-hidden="true">${ico}</span>${txt}</a>`).join("");
+      nav.innerHTML = ENLACES.map(([href, txt]) => `<a href="${href}"${href === aqui ? ' class="actual" aria-current="page"' : ""}>${txt}</a>`).join("");
       h.insertAdjacentElement("afterend", nav);
       if (s.publico) {                                               // con la app publicada, quien es administrador puede cerrar sesión
         const a = document.createElement("a"); a.href = "#"; a.innerHTML = "<span aria-hidden='true'>🚪</span>Salir";

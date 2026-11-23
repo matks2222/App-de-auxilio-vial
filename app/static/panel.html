@@ -1,7 +1,7 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel de demostración</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
-<link rel="stylesheet" href="/static/estilo.css?v=13"></head><body>
+<link rel="stylesheet" href="/static/estilo.css?v=14"></head><body>
 <header><h1>Panel de demostración</h1><a href="/">Inicio</a></header>
 <div class="panelgrid">
   <div id="mapa"></div>
@@ -41,7 +41,7 @@
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
-<script src="/static/comun.js?v=13"></script>
+<script src="/static/comun.js?v=14"></script>
 <script>
 const mapa = crearMapa("mapa", CENTRO, 14);
 const $ = (id) => document.getElementById(id);
@@ -65,7 +65,7 @@ let regPausado = false;
 function pintarRegistro(r) {
   regPausado = r.pausado;
   const m = Math.floor(r.segundos_bloqueo / 60) + 1;
-  $("regEstado").innerHTML = (r.pausado ? "🔒 Cerrado por ti. " : r.bloqueado ? `⛔ Bloqueado solo (${r.motivo}). Se reabre en ${m} min. ` : r.reto_activo ? "⚠️ Hay muchos registros: se pide un reto. " : "✅ Abierto. ")
+  $("regEstado").innerHTML = (r.pausado ? "Cerrado por ti. " : r.bloqueado ? `Bloqueado solo (${r.motivo}). Se reabre en ${m} min. ` : r.reto_activo ? "Hay muchos registros: se pide un reto. " : "Abierto. ")
     + `<br>Registros en 10 min: ${r.registros_10min} · códigos fallidos: ${r.codigos_fallidos_10min} · repartidores: ${r.repartidores}/${r.tope}`;
   $("btnPausa").textContent = r.pausado ? "Abrir registro" : "Cerrar registro";
 }
