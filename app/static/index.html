@@ -1,5 +1,5 @@
 <!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Taller en Ruta</title><link rel="stylesheet" href="/static/estilo.css?v=14"></head><body>
+<title>Taller en Ruta</title><link rel="stylesheet" href="/static/estilo.css?v=15"></head><body>
 <header><h1>Taller en Ruta</h1></header>
 <div class="tarjeta"><h2>¿Qué quieres hacer?</h2>
   <p>Lleva ayuda a quien se quedó varado: un <b>repartidor</b> (no hace falta que sea mecánico) llega hasta donde estás con
@@ -14,6 +14,9 @@
   </div>
   <div class="alerta"><b>Emergencias:</b> si hay riesgo para la vida o hubo un accidente con heridos, llama al <a href="tel:911">911</a>. Esta aplicación no sustituye a los servicios de emergencia.</div>
 </div>
-<script src="/static/comun.js?v=14"></script>
+<script src="/static/comun.js?v=15"></script>
+<div id="bloqueSalir" style="display:none;text-align:center;margin:10px"><button class="sec" id="btnSalir">Cerrar sesión de administrador</button></div>
+<script>fetch("/api/sesion").then((r) => r.json()).then((s) => { if (s.publico && s.admin) document.getElementById("bloqueSalir").style.display = "block"; }).catch(() => {});
+document.getElementById("btnSalir").onclick = async () => { await fetch("/api/logout", { method: "POST" }); location.href = "/login"; };</script>
 <div class="pie">Taller en Ruta · Menú de administración</div>
 </body></html>

@@ -68,29 +68,28 @@ function marcarTalleres(mapa, talleres) {
 }
 function fmtMXN(n) { return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n || 0); }
 
-// ---- Menú común: se inserta debajo del encabezado en todas las páginas para moverse entre ellas
+// ---- Menú común, debajo del encabezado.
+//  · Pantalla del cliente: sin menú.
+//  · Repartidor, taller y login: un solo botón «Inicio» que regresa a la página principal (lo ve cualquiera).
+//  · Páginas del administrador (menú, panel, QR, negocio): «Menú» y «Pantalla principal», solo para el administrador.
 (function () {
-  const ENLACES = [["/menu", "Inicio"], ["/repartidor", "Repartidor"]];          // lo demás (cliente, taller, QR, negocio, panel) está en Inicio, el menú de administración
-  const ALIAS = { "/": "/menu", "/prestador": "/repartidor", "/mecanico": "/repartidor" };
+  const SIN_MENU = ["/cliente"];
+  const SOLO_INICIO = ["/repartidor", "/prestador", "/mecanico", "/taller", "/login"];
+  const ADMIN = [["/menu", "Menú"], ["/", "Pantalla principal"]];
   function poner() {
     const h = document.querySelector("header");
-    if (!h || document.querySelector("nav.menu") || document.body.hasAttribute("data-sin-menu")) return;
-    // El menú lleva a páginas del administrador: solo se muestra en tu computadora (sin contraseña) o a quien inició sesión como administrador.
-    // Si no se puede saber, no se muestra.
-    fetch("/api/sesion").then((r) => r.json()).then((s) => {
-      if (s.publico && !s.admin) return;
+    const ruta = location.pathname;
+    if (!h || document.querySelector("nav.menu") || document.body.hasAttribute("data-sin-menu") || SIN_MENU.includes(ruta) || ruta.startsWith("/q/")) return;
+    const dibujar = (enlaces) => {
       if (document.querySelector("nav.menu")) return;
-      const aqui = ALIAS[location.pathname] || location.pathname;
       const nav = document.createElement("nav");
       nav.className = "menu";
-      nav.innerHTML = ENLACES.map(([href, txt]) => `<a href="${href}"${href === aqui ? ' class="actual" aria-current="page"' : ""}>${txt}</a>`).join("");
+      nav.innerHTML = enlaces.map(([href, txt]) => `<a href="${href}"${href === ruta ? ' class="actual" aria-current="page"' : ""}>${txt}</a>`).join("");
       h.insertAdjacentElement("afterend", nav);
-      if (s.publico) {                                               // con la app publicada, quien es administrador puede cerrar sesión
-        const a = document.createElement("a"); a.href = "#"; a.innerHTML = "<span aria-hidden='true'>🚪</span>Salir";
-        a.onclick = async (e) => { e.preventDefault(); await fetch("/api/logout", { method: "POST" }); location.href = "/login"; };
-        nav.appendChild(a);
-      }
-    }).catch(() => {});
+    };
+    if (SOLO_INICIO.includes(ruta)) return dibujar([["/", "Inicio"]]);
+    // Lo demás son páginas del administrador: solo se muestran enlaces en tu computadora (sin contraseña) o con sesión de administrador.
+    fetch("/api/sesion").then((r) => r.json()).then((s) => { if (!s.publico || s.admin) dibujar(ADMIN); }).catch(() => {});
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", poner); else poner();
 })();
