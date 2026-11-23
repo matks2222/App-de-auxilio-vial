@@ -1,0 +1,49 @@
+{
+  "origen_datos": "datos SIMULADOS (20000 viajes)",
+  "viajes": 20000,
+  "prueba": 4000,
+  "sklearn": "1.9.1",
+  "modelo": "HistGradientBoostingRegressor",
+  "caracteristicas": [
+    "distancia_m",
+    "hora",
+    "dia_semana",
+    "vehiculo"
+  ],
+  "metricas_modelo": {
+    "mae_s": 77.52248900035454,
+    "mediana_s": 45.53639148028594,
+    "mape": 0.13547930810639996,
+    "p90_s": 159.58769026071835
+  },
+  "metricas_formula": {
+    "mae_s": 223.38254841727243,
+    "mediana_s": 93.4303804709986,
+    "mape": 0.2976772293097132,
+    "p90_s": 470.815168412601
+  },
+  "por_vehiculo": {
+    "moto": {
+      "modelo_mae_s": 54.664855961683166,
+      "formula_mae_s": 129.58492686011283,
+      "n": 2202
+    },
+    "auto": {
+      "modelo_mae_s": 72.59131206761091,
+      "formula_mae_s": 133.33903127614096,
+      "n": 1174
+    },
+    "bicicleta": {
+      "modelo_mae_s": 111.58737409467219,
+      "formula_mae_s": 267.5141008983869,
+      "n": 421
+    },
+    "a_pie": {
+      "modelo_mae_s": 283.3372330667963,
+      "formula_mae_s": 1670.05283510695,
+      "n": 203
+    }
+  },
+  "mejora_mae": 0.6529608532554447,
+  "simulado": true
+}

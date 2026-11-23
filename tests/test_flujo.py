@@ -1371,3 +1371,77 @@ def test_el_estado_usa_el_tiempo_por_calles_cuando_lo_hay(est, monkeypatch):
     sin = est._pub_solicitud(est.solicitudes[s["id"]])["eta_s"]
     r.cache[rutas._clave(m["lat"], m["lon"], lat, lon)] = (123.0, 2000.0)
     assert est._pub_solicitud(est.solicitudes[s["id"]])["eta_s"] == 123.0 and sin != 123.0
+
+
+# ------------------------------------------------------------------ v14: modelo de IA para el tiempo de llegada
+def test_el_modelo_entrenado_carga_y_predice_algo_razonable():
+    from app import ia_eta
+    m = ia_eta.ModeloETA()
+    assert m.activo, "falta app/modelo/eta_modelo.joblib: corre python entrenar_eta.py"
+    t = 1_700_000_000                                              # una fecha cualquiera
+    cerca, lejos = m.predecir(500, t, "moto"), m.predecir(5000, t, "moto")
+    assert 20 <= cerca < lejos < 3 * 3600                          # más distancia, más tiempo
+    assert m.predecir(3000, t, "a_pie") > m.predecir(3000, t, "moto")    # a pie tarda más que en moto
+
+
+def test_sin_archivo_el_modelo_se_desactiva_sin_error(monkeypatch, tmp_path):
+    from app import ia_eta
+    monkeypatch.setenv("DESPACHO_MODELO", str(tmp_path / "no_existe.joblib"))
+    m = ia_eta.ModeloETA()
+    assert m.activo is False and m.predecir(1000, 0, "moto") is None
+
+
+def test_un_archivo_danado_no_rompe_la_app(monkeypatch, tmp_path):
+    from app import ia_eta
+    malo = tmp_path / "malo.joblib"
+    malo.write_bytes(b"esto no es un modelo")
+    monkeypatch.setenv("DESPACHO_MODELO", str(malo))
+    m = ia_eta.ModeloETA()
+    assert m.activo is False and m.predecir(1000, 0, "moto") is None
+
+
+def test_hora_y_dia_en_hora_de_mexico():
+    from app import ia_eta
+    # 2026-11-23 20:20 UTC es lunes 14:20 en México (UTC-6)
+    import calendar
+    t = calendar.timegm((2026, 11, 23, 20, 20, 0))
+    hora, dia = ia_eta.hora_y_dia(t)
+    assert abs(hora - 14.333) < 0.01 and dia == 0
+
+
+def test_cada_viaje_hasta_el_cliente_se_guarda_para_entrenar(est):
+    m = mec(est, "R", ("paso_de_corriente",), km=(2, 0))
+    s = sol(est)
+    est.paso_despacho()
+    est.responder_oferta(m["id"], s["id"], True)
+    est.r.t += 240
+    est.avanzar(m["id"], "llegue", pin=est.solicitudes[s["id"]]["pin"])
+    fila = est.db.execute("SELECT simulado, dist_m, vehiculo, duracion_s FROM viajes WHERE id = ?", (s["id"],)).fetchone()
+    assert fila is not None and fila[0] == 0 and 500 < fila[1] < 1500 and fila[3] == 240
+
+
+def test_el_estado_prefiere_el_modelo_a_la_formula_cuando_existe(est, monkeypatch):
+    from app import ia_eta
+    monkeypatch.delenv("RUTAS_API_KEY", raising=False)
+    m = mec(est, "R", ("paso_de_corriente",), km=(3, 0))
+    s = sol(est)
+    est.paso_despacho()
+    est.responder_oferta(m["id"], s["id"], True)
+    formula = motor.eta_s(m["lat"], m["lon"], s["lat"], s["lon"], est.config["vel_kmh"])
+    monkeypatch.setattr(ia_eta.modelo_eta, "predecir", lambda *a: 77.0)
+    assert est._pub_solicitud(est.solicitudes[s["id"]])["eta_s"] == 77.0
+    monkeypatch.setattr(ia_eta.modelo_eta, "predecir", lambda *a: None)
+    assert est._pub_solicitud(est.solicitudes[s["id"]])["eta_s"] == pytest.approx(formula)
+
+
+def test_el_entrenamiento_con_datos_reales_lee_la_tabla_de_viajes(tmp_path):
+    import sqlite3
+    import entrenar_eta
+    bd = tmp_path / "x.db"
+    con = sqlite3.connect(bd)
+    con.execute("CREATE TABLE viajes (id TEXT PRIMARY KEY, simulado INTEGER, t REAL, dist_m REAL, vehiculo TEXT, duracion_s REAL, eta_formula_s REAL)")
+    con.executemany("INSERT INTO viajes VALUES (?,?,?,?,?,?,?)", [("a", 0, 1_700_000_000, 1000, "moto", 200, 180), ("b", 1, 1_700_000_100, 900, "auto", 220, 160)])
+    con.commit()
+    con.close()
+    assert len(entrenar_eta.desde_db(str(bd))) == 1 and len(entrenar_eta.desde_db(str(bd), con_simulados=True)) == 2
+    assert len(entrenar_eta.generar_simulado(50)) == 50

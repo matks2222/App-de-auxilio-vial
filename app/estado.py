@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 
-from . import motor, rutas
+from . import ia_eta, motor, rutas
 
 MAX_PIN_INTENTOS = 5          # intentos de PIN por pedido antes de bloquear la llegada
 
@@ -64,6 +64,9 @@ class Estado:
         # Un renglón por servicio terminado: de aquí se aprende cuánto tarda y cuánto deja cada servicio de verdad.
         self.db.execute("CREATE TABLE IF NOT EXISTS servicios_hechos (id TEXT PRIMARY KEY, tipo TEXT, creado REAL, acepto REAL, llego REAL, "
                         "fin REAL, subtotal REAL, servicio REAL, total REAL, simulado INTEGER)")
+        # Un renglón por viaje del repartidor hasta el cliente: son los datos con los que se entrena el modelo de tiempos de llegada.
+        self.db.execute("CREATE TABLE IF NOT EXISTS viajes (id TEXT PRIMARY KEY, simulado INTEGER, t REAL, dist_m REAL, vehiculo TEXT, "
+                        "duracion_s REAL, eta_formula_s REAL)")
         self.db.commit()
         self.reiniciar()
 
@@ -563,10 +566,21 @@ class Estado:
             if acepta:
                 s["estado"], s["t_aceptada"] = "aceptada", self.reloj()
                 m["estado"] = "ocupado"
+                if m["lat"] is not None:                                  # de dónde sale el repartidor: dato para el modelo de tiempos
+                    s["_viaje"] = dict(dist_m=motor.distancia_m(m["lat"], m["lon"], s["lat"], s["lon"]), vehiculo=(m.get("vehiculo") or {}).get("tipo", "moto"),
+                                       t=s["t_aceptada"], eta_formula=motor.eta_desde_distancia(motor.distancia_m(m["lat"], m["lon"], s["lat"], s["lon"]), self.config["vel_kmh"]))
                 self.evento("oferta_aceptada", sid, mid, eta_s=s["eta_s"])
             else:
                 self._devolver_oferta(m, "oferta_rechazada")
                 m["estado"] = "libre"
+
+    def _guardar_viaje(self, s, m, ahora):
+        v = s.get("_viaje")
+        if not v:
+            return
+        self.db.execute("INSERT OR REPLACE INTO viajes VALUES (?,?,?,?,?,?,?)",
+                        (s["id"], 1 if m.get("bot") else 0, v["t"], v["dist_m"], v["vehiculo"], ahora - v["t"], v["eta_formula"]))
+        self.db.commit()
 
     def _excluido(self, s, mid, ahora):
         return mid in s["excluidos"] and ahora < s["excluido_hasta"].get(mid, float("inf"))
@@ -625,6 +639,7 @@ class Estado:
                         quedan = MAX_PIN_INTENTOS - s["pin_intentos"]
                         raise ValueError("PIN incorrecto. Pídeselo al cliente." + (f" Te quedan {quedan} intentos." if quedan else " Ya no te quedan intentos."))
                 s["estado"], s["t_llegada"] = "en_sitio", ahora
+                self._guardar_viaje(s, m, ahora)
                 self.evento("prestador_llego", s["id"], mid, espera_s=ahora - s["t_creada"])
             elif accion == "termine" and s["estado"] == "en_sitio":
                 s["estado"], s["t_fin"], s["resultado"] = "terminada", ahora, "resuelta"
@@ -786,8 +801,12 @@ class Estado:
         m = self.repartidores.get(s["repartidor_id"]) if s["repartidor_id"] else None
         eta = s["eta_s"]
         if m and s["estado"] == "aceptada" and m["lat"] is not None:
-            por_calles = rutas.rutas.eta(m["lat"], m["lon"], s["lat"], s["lon"])         # None si no está activado o aún no llega la consulta
-            eta = por_calles if por_calles is not None else motor.eta_s(m["lat"], m["lon"], s["lat"], s["lon"], self.config["vel_kmh"])
+            # Prioridad: 1) rutas por calles (si está activado), 2) modelo de aprendizaje automático (si existe), 3) fórmula.
+            eta = rutas.rutas.eta(m["lat"], m["lon"], s["lat"], s["lon"])
+            if eta is None:
+                eta = ia_eta.modelo_eta.predecir(motor.distancia_m(m["lat"], m["lon"], s["lat"], s["lon"]), self.reloj(), (m.get("vehiculo") or {}).get("tipo", "moto"))
+            if eta is None:
+                eta = motor.eta_s(m["lat"], m["lon"], s["lat"], s["lon"], self.config["vel_kmh"])
         return dict(id=s["id"], nombre=s["nombre"], lat=s["lat"], lon=s["lon"], tipo=s["tipo"], tipo_texto=motor.TIPOS[s["tipo"]],
                     nivel=s["nivel"], via=s["via"], notas=s["notas"], riesgo=s["riesgo"], prioridad=s["prioridad"],
                     prioridad_texto=motor.NOMBRE_PRIORIDAD[s["prioridad"]], razones=s["razones"], estado=s["estado"],

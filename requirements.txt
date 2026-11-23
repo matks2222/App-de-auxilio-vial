@@ -6,3 +6,6 @@ h3
 httpx
 pytest
 qrcode
+scikit-learn==1.9.1
+joblib
+matplotlib
